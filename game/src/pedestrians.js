@@ -64,6 +64,37 @@ export function pedestrianSpawn(peds, focusX, focusZ) {
   return null;
 }
 
+/**
+ * Staging's named placement: one walker spawned exactly at (x, z), bypassing the corner-pick so
+ * walkerKerbCrowd can line a kerb deterministically. Returns the walker or null when the spot is
+ * unwalkable or occupied — staging's caller counts the plates that actually landed.
+ */
+export function pedestrianSpawnAt(peds, x, z) {
+  const spot = { x, z };
+  if (peds.isWalkable && !peds.isWalkable(x, z)) return null;
+  for (const other of peds.peds) {
+    if (dist2(other.x, other.z, x, z) < 16 * 16) return null;
+  }
+  const r = peds.rng;
+  const look = PALETTES[r.int(PALETTES.length)];
+  const ped = {
+    id: nextPedId++,
+    x: x + r.range(-3, 3), z: z + r.range(-3, 3),
+    vx: 0, vz: 0, heading: r.next() * Math.PI * 2,
+    look, bob: r.int(64),
+    state: 'walk',
+    speed: r.range(11, 16),
+    target: null,
+    laneKickX: NaN, laneKickZ: NaN,
+    flatTimer: 0,
+    panicTimer: 0,
+    health: 30,
+  };
+  pickCornerTarget(peds, ped);
+  peds.peds.push(ped);
+  return ped;
+}
+
 /** Top up the crowd around the focus; called every tick, spawns at most a few walkers at a time. */
 export function pedestrianSpawnTopUp(peds, focusX, focusZ, max = TRAFFIC.pedestrians) {
   let want = max;
