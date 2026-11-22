@@ -5,7 +5,7 @@
 // runOver knocks a struck pedestrian flat with a despawn timer, and the pacify timer lets
 // a scared crowd calm back down to a wander when the trouble has passed. All positions and
 // choices come from the system's own seeded Rng so the crowd is fully deterministic.
-import { TRAFFIC } from './config.js';
+import { TRAFFIC, STEP } from './config.js';
 import { Rng, clamp, dist2, moveToward, angleDelta, wrapAngle } from './util.js';
 
 const PALETTES = [
@@ -33,23 +33,26 @@ export function createPedestrians(city, seed = 777) {
 export function pedestrianSpawn(peds, focusX, focusZ) {
   const r = peds.rng;
   const spots = peds.city.sidewalkSpots;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+  for (let attempt = 0; attempt < 14; attempt += 1) {
     const spot = spots[r.int(spots.length)];
-    if (dist2(spot.x, spot.z, focusX, focusZ) > TRAFFIC.spawnRadius * TRAFFIC.spawnRadius) continue;
+    // most walkers appear close to the focus (the camera's stage), the rest keep the blocks alive
+    const reach = (attempt < 9 ? TRAFFIC.spawnRadius * 0.4 : TRAFFIC.spawnRadius);
+    if (dist2(spot.x, spot.z, focusX, focusZ) > reach * reach) continue;
     let occupied = false;
     for (const other of peds.peds) {
-      if (dist2(other.x, other.z, spot.x, spot.z) < 26 * 26) { occupied = true; break; }
+      if (dist2(other.x, other.z, spot.x, spot.z) < 20 * 20) { occupied = true; break; }
     }
     if (occupied) continue;
     const look = PALETTES[r.int(PALETTES.length)];
     const ped = {
       id: nextPedId++,
       x: spot.x + r.range(-4, 4), z: spot.z + r.range(-4, 4),
-      vx: 0, vz: 0, heading: r.angle(),
+      vx: 0, vz: 0, heading: r.next() * Math.PI * 2, // Rng.angle() is a vector; headings are scalars
       look, bob: r.int(64),
       state: 'walk', // walk | panic | flat | gone
       speed: r.range(11, 16),
       target: null, // the corner being walked toward
+      laneKickX: NaN, laneKickZ: NaN, // where runOver shoves a struck walker out of the lane
       flatTimer: 0, // seconds since knocked flat
       panicTimer: 0, // seconds of panicRun left before pacify
       health: 30,
@@ -98,7 +101,7 @@ export function panicPedsNear(peds, x, z, worldTick, duration = 6, panicRadius =
     if (dist2(ped.x, ped.z, x, z) < r2) {
       ped.state = 'panic';
       ped.panicTimer = duration;
-      const away = Math.atan2(ped.z - z, ped.x); // screen-x away from danger: heading is atan2(dz,dx) space here
+      const away = Math.atan2(ped.x - x, ped.z - z); // sprint directly away from the trouble
       ped.heading = away;
       ped.target = null;
     }
@@ -111,15 +114,21 @@ export function panicPedsNear(peds, x, z, worldTick, duration = 6, panicRadius =
  */
 export function runOver(ped, impactSpeed) {
   if (ped.state === 'flat' || ped.state === 'gone') return false;
+  // a slow bump on a calm walker: just a shove, the walker is annoyed but keeps going
   if (impactSpeed < 24 && ped.state !== 'panic') {
-    // a slow bump: just a shove, the walker is annoyed but keeps going
     ped.state = 'panic';
     ped.panicTimer = 3;
+    ped.vx *= 0.2; ped.vz *= 0.2;
     return false;
   }
+  // a real hit: knock them flat, spin them out of the traffic lane so they don't re-collide
   ped.state = 'flat';
   ped.flatTimer = 0;
   ped.vx = 0; ped.vz = 0;
+  if (typeof ped.x === 'number' && typeof ped.laneKickX === 'number') {
+    ped.x = ped.laneKickX;
+    ped.z = ped.laneKickZ;
+  }
   return true; // knocked flat
 }
 
@@ -167,6 +176,7 @@ export function updatePedestrian(peds, ped, dt) {
 }
 
 function stepAndCollide(peds, ped, dt) {
+  ped.px = ped.x; ped.pz = ped.z;
   ped.x += ped.vx * dt;
   ped.z += ped.vz * dt;
   ped.bob = (ped.bob + 1) & 63;
@@ -179,10 +189,22 @@ function stepAndCollide(peds, ped, dt) {
 function keepOffWaterAndWalls(peds, ped) {
   const walkable = peds.isWalkable && peds.isWalkable(ped.x, ped.z);
   if (walkable) return;
-  ped.x -= ped.vx * 0.06;
-  ped.z -= ped.vz * 0.06;
+  // the whole step is undone (never a 6% nudge into the bay), then a quarter-turn away
+  if (typeof ped.px === 'number') { ped.x = ped.px; ped.z = ped.pz; }
   pickCornerTarget(peds, ped);
   ped.heading = wrapAngle(ped.heading + Math.PI / 2);
+}
+
+/** Warm-up: keep ticking the crowd until it is truly dense around the camera's stage. */
+export function pedestrianWarmUp(peds, focusX, focusZ, wanted = TRAFFIC.pedestrians) {
+  for (let i = 0; i < 40 && peds.peds.length < wanted; i += 1) {
+    pedestrianSpawnTopUp(peds, focusX, focusZ, wanted);
+    for (const ped of peds.peds) updatePedestrian(peds, ped, STEP);
+  }
+  for (const ped of peds.peds) if (typeof ped.x !== 'number') ped.state = 'gone';
+  const keep = [];
+  for (const ped of peds.peds) if (ped.state !== 'gone') keep.push(ped);
+  peds.peds = keep;
 }
 
 /**

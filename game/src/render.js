@@ -8,7 +8,7 @@
 // pixel, and fillMinimap paints the whole island legibly at 200 px.
 import { TILE, WATER_START, PALETTE, CAMERA, VIEW, MINIMAP } from './config.js';
 import { T_ROAD, T_SIDEWALK, T_LOT, T_WATER, T_PARK, T_QUAY, tileType } from './city.js';
-import { lerp, hash2, shadeHex, blendHex, smoothstep } from './util.js';
+import { lerp, clamp, hash2, shadeHex, blendHex, smoothstep } from './util.js';
 import {
   ambientLevel, lightsAreOn, windowLitFraction, sunPosition, skyGradient, tintForTime,
 } from './world.js';

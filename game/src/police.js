@@ -8,14 +8,16 @@
 // fade and everyone despawns. Every cruiser is a sedan_police with the sirenOn strobe the
 // vehicles layer already flashes red and blue every six ticks.
 import { WANTED, TILE } from './config.js';
+import { boxHitsBuilding } from './city.js';
 import { Rng, clamp, dist2, wrapAngle, angleDelta, moveToward, lerp } from './util.js';
-import { createVehicle, updateVehicle, separateVehicles, vehicleSpeed } from './vehicles.js';
+import { createVehicle, updateVehicle, doorPosition, separateVehicles, tickVehicleCommon, vehicleSpeed } from './vehicles.js';
 
 const OFFICER_COLORS = { shirt: '#2c4a7c', pants: '#22283a', skin: '#d9a184' };
 const COP_SHOOT_RANGE = 190;
 const COP_ARREST_RANGE = 18;
 const COP_WALK = 26;
 const COP_RUN = 52;
+const COP_GIVEUP_RANGE = 560;
 
 let nextCopId = 1;
 
@@ -51,12 +53,19 @@ export function wantedLevelStars(police) {
  */
 export function reportWitnessCrime(police, player, peds, x, z, heat, crimeName, witnessRange = 300) {
   let witnessed = true; // the hero themselves count as the scene; assume seen unless told nobody is around
-  if (peds && peds.peds) {
+  if (peds && (peds.peds || peds.trafficCars)) {
     witnessed = false;
     const r2 = witnessRange * witnessRange;
-    for (const ped of peds.peds) {
+    for (const ped of peds.peds || []) {
       if (ped.state === 'gone') continue;
       if (dist2(ped.x, ped.z, x, z) < r2) { witnessed = true; break; }
+    }
+    if (!witnessed) {
+      // drivers at the wheel are witnesses too: a boulevard full of traffic sees everything
+      for (const car of peds.trafficCars || []) {
+        if (car.driver !== 'npc') continue;
+        if (dist2(car.x, car.z, x, z) < r2) { witnessed = true; break; }
+      }
     }
     if (peds.officersNear && peds.officersNear(x, z, witnessRange)) witnessed = true;
   }
@@ -87,7 +96,6 @@ export function spawnFootOfficer(police, x, z) {
     id: nextCopId++,
     kind: 'officer',
     x, z, vx: 0, vz: 0,
-    heading: r.angle() ?? 0,
     heading: r.next() * Math.PI * 2,
     state: 'patrol', // patrol | pursue | arrest | gone
     look: OFFICER_COLORS,
@@ -174,12 +182,26 @@ export function cruiserPursueControls(police, car, player, others) {
   return { throttle, steer: turn, handbrake: car.slipCrash && false };
 }
 
+/** Line of sight from a unit to the hero: sampled along the segment, buildings block it. */
+export function canOfficerSeePlayer(police, city, fromX, fromZ, player) {
+  const dx = player.x - fromX;
+  const dz = player.z - fromZ;
+  const dist = Math.hypot(dx, dz);
+  if (dist > 340) return false; // beyond the beat's sightline
+  const steps = 10;
+  for (let s = 1; s < steps; s += 1) {
+    const t = s / steps;
+    if (boxHitsBuilding(city, fromX + dx * t - 2, fromZ + dz * t - 2, 4, 4)) return false;
+  }
+  return true;
+}
+
 /**
  * pursuePlayer: the whole department's tick. Foot officers run at the hero and open fire when
  * they see him armed; cruisers steer in, sirens strobing; the arrest lands on contact with a
- * slow hero; and the loseHeatTimer grinds the heat down whenever no unit has line of sight
- * (simply: nobody near), so hiding in an alley cools the stars back to zero and everyone
-# despawns.
+ * slow hero; a runner far out of reach gives his unit the slip (they stop and watch the road,
+ * keeping the heat alive), and the loseHeatTimer grinds the heat down whenever no unit has line
+ * of sight until the stars fade and everyone despawns.
  */
 export function pursuePlayer(police, player, city, lanes, dt, worldTick, playerArmed) {
   const stars = police.stars;
@@ -189,9 +211,11 @@ export function pursuePlayer(police, player, city, lanes, dt, worldTick, playerA
   for (const officer of police.officers) {
     if (officer.state === 'gone') continue;
     const d2 = dist2(officer.x, officer.z, player.x, player.z);
-    const sees = d2 < 340 * 340;
-    officer.seesPlayer = sees;
-    if (sees) anySees = true;
+    const dist = Math.sqrt(d2);
+    // a runner far out of reach and out of sight gives this unit the slip: hold the beat
+    if (dist > COP_GIVEUP_RANGE) { officer.seesPlayer = false; continue; }
+    officer.seesPlayer = canOfficerSeePlayer(police, city, officer.x, officer.z, player);
+    if (officer.seesPlayer) anySees = true;
     const run = stars > 0 && d2 > COP_ARREST_RANGE * COP_ARREST_RANGE;
     officer.heading = wrapAngle(officer.heading
       + clamp(angleDelta(officer.heading, Math.atan2(player.x - officer.x, player.z - officer.z)), -6 * dt, 6 * dt));
@@ -202,9 +226,11 @@ export function pursuePlayer(police, player, city, lanes, dt, worldTick, playerA
     officer.z += officer.vz * dt;
     officer.bob = (officer.bob + 1) & 63;
     if (tryArrest(police, player, officer)) { officer.state = 'arrest'; }
-    // open fire when the hero is armed, wanted, and in range — a measured burst, not a wall of lead
+    // open fire only with a clear line of sight — a measured burst, not a wall of lead,
+    // and never through storefronts
     officer.shootCooldown -= dt;
-    if (playerArmed && stars > 0 && !player.bustedState && d2 < COP_SHOOT_RANGE * COP_SHOOT_RANGE && officer.shootCooldown <= 0) {
+    if (playerArmed && stars > 0 && !player.bustedState && officer.seesPlayer
+      && d2 < COP_SHOOT_RANGE * COP_SHOOT_RANGE && officer.shootCooldown <= 0) {
       officer.shootCooldown = 1.1;
       officer.burst = 3;
       police.wantShoot = police.wantShoot || [];
@@ -218,7 +244,10 @@ export function pursuePlayer(police, player, city, lanes, dt, worldTick, playerA
   for (const car of police.cruisers) {
     const controls = cruiserPursueControls(police, car, player);
     updateVehicle(car, city, controls, dt);
-    car.sirenOn = !player.bustedState && stars > 0;
+    const emergingStars = Math.max(police.stars, wantedLevelStars(police));
+    // sirens blaze the moment the department is after the hero: the strobe is the screenshot
+    car.sirenOn = emergingStars > 0 && !player.bustedState;
+    tickVehicleCommon(car, dt);
     const d2 = dist2(car.x, car.z, player.x, player.z);
     if (d2 < 360 * 360) anySees = true;
     // the cruiser's officers bail out to make the arrest when the hero is nearly cornered
