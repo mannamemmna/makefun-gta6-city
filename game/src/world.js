@@ -56,7 +56,7 @@ function computeSun(world) {
   const phase = world.minutes / DAY_MINUTES; // 0 midnight .. 0.5 noon
   world.sunElev = Math.sin((phase - 0.25) * Math.PI * 2);
   world.sunAz = (phase - 0.25) * Math.PI * 2; // 0 at 6:00 sunrise, PI at 18:00 sunset
-  world.rising = phase < 0.25 || phase >= 0.75; // true through the dawn half of the day
+  world.rising = phase >= 0.25 && phase < 0.75; // the sun climbs from 6:00 to 18:00
 }
 
 /** How much light is in the sky: 0 deep night .. 1 midday. */
