@@ -58,12 +58,15 @@ window.__shotReady = false; // only a staged shot (added by a later session) eve
 // probes and staged screenshots are pixel-identical run to run.
 let settleTicks = 0;
 function steppedFrame() {
-  if (settleTicks < SHOT_SETTLE_TICKS) {
-    tickOnce();
-    settleTicks += 1;
-    if (settleTicks >= SHOT_SETTLE_TICKS && shotName) {
-      // staged shot not implemented yet (a later session owns it): freeze, never signal ready
+  if (shotName) {
+    // A staged shot: settle the camera for SHOT_SETTLE_TICKS, then freeze — identical pixels
+    // every run. The staged scenes themselves arrive with a later session's staging module.
+    if (settleTicks < SHOT_SETTLE_TICKS) {
+      tickOnce();
+      settleTicks += 1;
     }
+  } else {
+    tickOnce(); // normal play: the clock runs with the loop
   }
   renderer.render(world, null);
 }

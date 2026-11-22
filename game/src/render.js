@@ -6,11 +6,11 @@
 // window grids, palms and street lamps, then any actors the scene hands it, then the night
 // vignette. projectTo(x, y, z) is exposed on the renderer so staging can pin a name to an exact
 // pixel, and fillMinimap paints the whole island legibly at 200 px.
-import { TILE, CITY_TILES, WATER_START, PALETTE, CAMERA, VIEW, MINIMAP } from './config.js';
+import { TILE, WATER_START, PALETTE, CAMERA, VIEW, MINIMAP } from './config.js';
 import { T_ROAD, T_SIDEWALK, T_LOT, T_WATER, T_PARK, T_QUAY, tileType } from './city.js';
-import { clamp, lerp, hash2, shadeHex, blendHex, smoothstep } from './util.js';
+import { lerp, hash2, shadeHex, blendHex, smoothstep } from './util.js';
 import {
-  ambientLevel, lightsAreOn, windowLitFraction, sunPosition, skyGradient, tintForTime, clockString,
+  ambientLevel, lightsAreOn, windowLitFraction, sunPosition, skyGradient, tintForTime,
 } from './world.js';
 
 const GROUND_COLORS = {
@@ -241,7 +241,7 @@ export function createRenderer(canvas) {
     const x0 = tx0 * TILE;
     const x1 = tx1 * TILE;
     const z0 = tz * TILE;
-    const z1 = z1At(city, tz);
+    const z1 = (tz + 1) * TILE;
     const a = projectTo(cam, x0, 0, z0, view.w, view.h);
     const b = projectTo(cam, x1, 0, z0, view.w, view.h);
     const c = projectTo(cam, x1, 0, z1, view.w, view.h);
@@ -260,23 +260,35 @@ export function createRenderer(canvas) {
     ctx.lineTo(d.sx, d.sy);
     ctx.closePath();
     ctx.fill();
+  }
 
-    // boulevard centre dashes: draw only on the second road tile of each pair
-    if (type === T_ROAD && (tx0 & 1) === 1) {
-      const midX = tx0 * TILE;
-      const north = tileType(city, tx0, tz);
-      if (north === T_ROAD && (tz % 8) - 1 === (tx0 % 8) - 1) {
-        // vertical boulevard: dash runs along z at x = tile centre
-        if ((tx0 & 7) === 1) {
-          const m1 = projectTo(cam, midX, 0, z0, view.w, view.h);
-          const m2 = projectTo(cam, midX, 0, z1, view.w, view.h);
-          if (m2.sy - m1.sy > 0.8) {
-            ctx.fillStyle = shadeHex(PALETTE.laneMark, 0.45 + 0.55 * amb);
-            ctx.fillRect(m1.sx - 0.7, m1.sy, 1.4, m2.sy - m1.sy);
-          }
-        }
+  /** The boulevards' centre dashes, one pass over every boulevard mid-line, far to near. */
+  function drawLaneMarks(world) {
+    const amb = ambientLevel(world);
+    ctx.strokeStyle = shadeHex(PALETTE.laneMark, 0.45 + 0.55 * amb);
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([9, 13]);
+    for (let b = 0; b <= 28; b += 1) {
+      const mid = (b * 8 + 1) * TILE; // the seam between a boulevard's two tiles
+      const end = WATER_START * TILE - TILE;
+      const p0 = projectTo(cam, mid, 0, 0, view.w, view.h);
+      const p1 = projectTo(cam, mid, 0, end, view.w, view.h);
+      if (p1.sy - p0.sy > 1) {
+        ctx.beginPath();
+        ctx.moveTo(p0.sx, p0.sy);
+        ctx.lineTo(p1.sx, p1.sy);
+        ctx.stroke();
+      }
+      const q0 = projectTo(cam, 0, 0, mid, view.w, view.h);
+      const q1 = projectTo(cam, end, 0, mid, view.w, view.h);
+      if (q1.sx - q0.sx > 1) {
+        ctx.beginPath();
+        ctx.moveTo(q0.sx, q0.sy);
+        ctx.lineTo(q1.sx, q1.sy);
+        ctx.stroke();
       }
     }
+    ctx.setLineDash([]);
   }
 
   // ---------------------------------------------------------------- buildings
@@ -285,15 +297,13 @@ export function createRenderer(canvas) {
    * from one box. Windows are a grid interpolated across the front face, lit by the game clock.
    * Improved detail: buildings near the camera get roof top-lines and AC boxes.
    */
-  function drawBuildings(world, lights) {
+  function drawBuildings(world) {
     const scale = cam.scale * cam.zoom;
     const depthMax = ((view.h - view.h * cam.horizon) + 60) / (cam.pitchShear * scale);
     const halfW = (view.w / 2) / scale;
     const cos = Math.cos(cam.yaw);
     const sin = Math.sin(cam.yaw);
     const amb = ambientLevel(world);
-    const lit = lightsAreOn(world);
-    const sky = skyGradient(world);
 
     const visible = [];
     for (const b of city.buildings) {
@@ -307,27 +317,26 @@ export function createRenderer(canvas) {
     }
     visible.sort((p, q) => p.depth - q.depth);
 
-    for (const { b } of visible) {
-      const bodyTint = tintForTime(b.tint, world);
-      const shade = shadeHex(bodyTint, 0.42 + 0.58 * amb);
-      const faceCLit = litFaces(world, b, cos, sin);
-      // south face (z max) and east face (x max) vs north/west by the yaw's sign
-      const showSouth = sin > -0.001 ? 1 : 0;
-      const showEast = cos > 0 ? 1 : 0;
-      // depth-sort the two faces so the nearer one paints on top
-      const corners = boxCorners(b);
+    // The sun's ground bearing at this hour, for deciding which walls it grazes.
+    const sunGroundX = Math.cos(world.sunAz) * Math.max(world.sunElev, 0);
+    const sunGroundZ = Math.sin(world.sunAz) * Math.max(world.sunElev, 0);
 
+    for (const { b } of visible) {
+      const corners = boxCorners(b);
       const faces = [];
-      if (sin >= 0) faces.push(faceFromEdge(corners.sw, corners.se, b.h, showSouth)); // south, z1
-      else faces.push(faceFromEdge(corners.nw, corners.ne, b.h, 0)); // north, z0
-      if (cos >= 0) faces.push(faceFromEdge(corners.se, corners.ne, b.h, 1)); // east, x1
-      else faces.push(faceFromEdge(corners.sw, corners.nw, b.h, 1)); // west, x0
-      faces.sort((f) => f.depth);
+      // the two walls the yaw leaves fronting the camera: south or north, east or west
+      if (sin >= 0) faces.push(faceFromEdge(corners.sw, corners.se, b.h, 0, 1));
+      else faces.push(faceFromEdge(corners.nw, corners.ne, b.h, 0, -1));
+      if (cos >= 0) faces.push(faceFromEdge(corners.se, corners.ne, b.h, 1, 0));
+      else faces.push(faceFromEdge(corners.sw, corners.nw, b.h, -1, 0));
 
       for (const f of faces) {
-        ctx.fillStyle = f.side ? shade : shadeHex(bodyTint, (0.42 + 0.58 * amb) * 0.86);
+        const nx = f.nx, nz = f.nz;
+        const sunOn = 0.5 + 0.5 * (nx * sunGroundX + nz * sunGroundZ) * 1.6; // 0..1 wall light
+        const bodyTint = tintForTime(b.tint, world);
+        ctx.fillStyle = shadeHex(bodyTint, (0.42 + 0.58 * amb) * (0.78 + 0.24 * sunOn));
         drawQuad(f.p0, f.p1, f.p2, f.p3);
-        drawWindowGrid(world, f, b, lit, sky);
+        drawWindowGrid(world, f, b, amb);
       }
 
       // roof
@@ -352,8 +361,7 @@ export function createRenderer(canvas) {
           ctx.fillRect(p.sx - 4, p.sy - 3, 8, 4);
         }
       }
-      if (b.name !== undefined && b.name !== null) drawLandmarkSign(b, world, amb);
-      void faceCLit; void corners;
+      if (b.name) drawLandmarkSign(b, world, amb);
     }
   }
 
@@ -366,13 +374,13 @@ export function createRenderer(canvas) {
     };
   }
 
-  /** The quad for one wall: two ground corners swept up to height h. */
-  function faceFromEdge(c0, c1, h, isSide) {
+  /** The quad for one wall: two ground corners swept up to height h. nx/nz is its outward normal. */
+  function faceFromEdge(c0, c1, h, nx, nz) {
     const g0 = projectTo(cam, c0.x, 0, c0.z, view.w, view.h);
     const g1 = projectTo(cam, c1.x, 0, c1.z, view.w, view.h);
     const t0 = projectTo(cam, c0.x, h, c0.z, view.w, view.h);
     const t1 = projectTo(cam, c1.x, h, c1.z, view.w, view.h);
-    return { p0: g0, p1: g1, p2: t1, p3: t0, depth: g0.depth, side: isSide };
+    return { p0: g0, p1: g1, p2: t1, p3: t0, depth: g0.depth, nx, nz };
   }
 
   function drawQuad(a, b, c, d) {
@@ -385,69 +393,63 @@ export function createRenderer(canvas) {
     ctx.fill();
   }
 
-  /** Lamp-lit window grid across one wall, bilinear in screen space, density by building style. */
-  function drawWindowGrid(world, face, b, lit, sky) {
+  /**
+   * The window grid on one wall: rows and columns interpolated along the wall's screen quad, each
+   * pane lit or dark from the pane's own hash and the game clock's windowLitFraction.
+   */
+  function drawWindowGrid(world, face, b, amb) {
     const wallW = Math.hypot(face.p1.sx - face.p0.sx, face.p1.sy - face.p0.sy);
-    const wallH = face.p3.sy - face.p0.sy;
-    if (wallW < 12 || wallH < 12) return;
-    const cols = clamp(Math.floor(wallW / 7), 1, 14);
-    const rowsN = clamp(Math.floor(wallH / 9), 1, 30);
+    const wallH = face.p0.sy - face.p3.sy; // ground-to-roof on screen
+    if (wallW < 10 || wallH < 10) return;
+    const cols = Math.max(1, Math.min(12, Math.floor(wallW / 7)));
+    const rowsN = Math.max(1, Math.min(Math.floor(wallH / 8), 34));
     const litFrac = windowLitFraction(world, b.litSeed);
-    const marginX = wallW / (cols * 5);
-    const dx = (wallW - marginX * 2) / cols;
-    const dy = (wallH - marginX * 2 - 4) / rowsN;
-    if (dy < 2 || dx < 2) return;
-    const baseY = face.p0.sy + marginX + 2;
-    const ux = (face.p1.sx - face.p0.sx) / wallW;
-    const uy = (face.p1.sy - face.p0.sy) / wallW;
-    const wW = Math.max(1.2, dx * 0.62);
-    const hW = Math.max(1.5, dy * 0.6);
-    for (let rowi = 0; rowi < rowsN; rowi += 1) {
-      const y0 = baseY + rowi * dy;
-      for (let coli = 0; coli < cols; coli += 1) {
-        const along = marginX + cola(coli, dx);
-        const sx = face.p0.sx + ux * along;
-        const sy = face.p0.sy + uy * along + rowi * dy + marginX + 2;
-        const cellHash = hash2(b.litSeed + rowi * 31, coli * 17, 3);
-        const on = lit * (cellHash < litFrac * 1.15);
-        if (on > 0.12) {
-          ctx.fillStyle = cellHash > 0.75 ? PALETTE.windowLitCool : PALETTE.windowLit;
-          ctx.globalAlpha = clamp(on, 0, 1);
+    const litGlow = lightsAreOn(world);
+    const ux = (face.p1.sx - face.p0.sx) / cols;
+    const uy = (face.p1.sy - face.p0.sy) / cols;
+    const dy = -wallH / (rowsN + 1);
+    const paneW = Math.max(1.2, Math.abs(ux) * 0.55);
+    const paneH = Math.max(1.4, -dy * 0.52);
+    const darkPane = shadeHex(PALETTE.windowDark, 0.4 + 0.6 * amb);
+    for (let row = 1; row <= rowsN; row += 1) {
+      for (let col = 0; col < cols; col += 1) {
+        const cellHash = hash2(b.litSeed % 100000 + row * 31, col * 17 + (b.style === 'tower' ? 5 : 0), 3);
+        const lit = litGlow > 0.12 && cellHash < litFrac * 1.2;
+        if (lit) {
+          ctx.globalAlpha = litGlow;
+          ctx.fillStyle = cellHash > 0.78 ? PALETTE.windowLitCool : PALETTE.windowLit;
         } else {
-          ctx.fillStyle = shadeHex(PALETTE.windowDark, 0.4 + 0.6 * ambientLevel(world));
-          ctx.globalAlpha = 0.8;
+          ctx.globalAlpha = 0.75;
+          ctx.fillStyle = darkPane;
         }
-        ctx.fillRect(sx - y0 * 0, y0 + 0, wW, hH);
-        void sx; void sy;
-        ctx.globalAlpha = 1;
+        ctx.fillRect(
+          face.p0.sx + ux * (col + 0.25), // gap before each pane
+          face.p0.sy + uy * (col + 0.25) + dy * row,
+          paneW, paneH,
+        );
       }
     }
-    void sky;
-  }
-
-  function cola(coli, dx) {
-    return coli * dx;
-  }
-
-  function litFaces(world, b, cos, sin) {
-    // which of the four walls the sun grazes; kept simple: sun side by azimuth sign
-    return sin + cos;
+    ctx.globalAlpha = 1;
   }
 
   /** A painted sign board with the landmark's name, big enough to read in a screenshot. */
   function drawLandmarkSign(b, world, amb) {
-    const p = projectTo(cam, b.cx, Math.min(b.h * 0.55, 74), b.z + b.d, view.w, view.h);
+    // pin to the centre of whichever wall faces the camera, 42% of the way up
+    const faceZ = Math.sin(cam.yaw) >= 0 ? b.z + b.d : b.z;
+    const p = projectTo(cam, b.cx, b.h * 0.42, faceZ, view.w, view.h);
     if (!p.visible || p.sy < 0) return;
     const text = b.name ?? '';
     ctx.font = '700 13px system-ui, sans-serif';
-    const width = ctx.measureText(text).width;
-    if (width < 4) return;
+    const width = ctx.measureText(text).width + 10;
+    if (width < 14) return;
     ctx.fillStyle = shadeHex('#1c2028', 0.5 + 0.5 * amb);
-    ctx.fillRect(p.sx - width / 2 - 5, p.sy - 11, width + 10, 15);
+    ctx.fillRect(p.sx - width / 2 - 5, p.sy - 11, width, 15);
     ctx.fillStyle = PALETTE.signInk;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(text, p.sx, p.sy - 3);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
   }
 
   // ---------------------------------------------------------------- props
@@ -530,7 +532,8 @@ export function createRenderer(canvas) {
     drawDistantSkyline(sky);
     drawWaterAndShimmer(world, sky);
     drawGroundTiles(world);
-    drawBuildings(world, sky);
+    drawLaneMarks(world);
+    drawBuildings(world);
 
     // depth-sorted layer: palms, lamps and whatever actors the scene brings
     const layer = [];
@@ -615,10 +618,9 @@ export function fillMinimap(mctx, cam, city, marks = [], size = MINIMAP.size) {
     mctx.lineTo(px(WATER_START * TILE), at);
     mctx.stroke();
   }
-  void CITY_TILES; void T_SIDEWALK; void T_LOT; void T_PARK;
 
   // the sea: a thick blue L wrapping the south and east quays
-  mctx.fillStyle = MINIMAP.waterInkFill();
+  mctx.fillStyle = MINIMAP.waterInk;
   const wStart = px(WATER_START * TILE);
   mctx.fillRect(wStart, 0, size - wStart, size);
   mctx.fillRect(0, wStart, size, size - wStart);
