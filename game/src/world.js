@@ -16,7 +16,7 @@ const PRESET_COLORS = {
  * its elevation and where it sits on the screen.
  */
 export function createWorld(minutes = START_MINUTES) {
-  return {
+  const world = {
     minutes,
     day: 0,
     time: 0, // total fixed ticks elapsed, a render-phase clock for shimmer and sway
@@ -24,6 +24,8 @@ export function createWorld(minutes = START_MINUTES) {
     sunAz: 0,
     rising: true,
   };
+  computeSun(world);
+  return world;
 }
 
 /** The clock at hh:mm, for staging scenes at a chosen hour. */
