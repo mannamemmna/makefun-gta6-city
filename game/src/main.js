@@ -5,7 +5,7 @@
 // action bits route to enter/exit and weapon swaps, and ?shot= still freezes the clock after 60
 // settle ticks so probes and staged screenshots are pixel-identical.
 // Sessions 3-5 add missions, HUD and shot staging on top of the same tickOnce() gate below.
-import { STEP, TRAFFIC, CAMERA } from './config.js';
+import { STEP, TRAFFIC, CAMERA, PLAYER } from './config.js';
 
 import { createCity, laneCenters, isWalkable, boxHitsBuilding } from './city.js';
 import { createWorld, advanceWorldTicks, ambientLevel } from './world.js';
@@ -14,8 +14,9 @@ import {
 } from './render.js';
 import {
   createInput, ACTION_ENTER_EXIT, ACTION_WEAPON_NEXT, ACTION_WEAPON_1, ACTION_WEAPON_2, ACTION_WEAPON_3,
+  ACTION_PAUSE,
 } from './input.js';
-import { clamp, dist2, wrapAngle, angleDelta } from './util.js';
+import { clamp, dist2, wrapAngle, angleDelta, Rng } from './util.js';
 import {
   updateVehicle, enterCar, exitCar, doorPosition, separateVehicles, damageCar, vehicleSpeed,
 } from './vehicles.js';
@@ -53,9 +54,8 @@ import {
   paintPedestrian, paintOfficer, paintPlayer, paintCar, paintTracer, paintMuzzleFlash, paintSpark,
 } from './sprites.js';
 import { clockString } from './world.js';
-import { VIEW } from './config.js';
-import { MANIFEST } from './manifest.js';
-import { hasSave } from './save.js';
+
+import { hasSave, saveSlot, loadSlot, clearSave } from './save.js';
 
 const params = new URLSearchParams(window.location.search);
 export const shotName = params.get('shot'); // ?shot=cover | driving | chase | mission | freeze
@@ -296,7 +296,7 @@ function startNewGame() {
   player.x = city.playerSpawn.x;
   player.z = city.playerSpawn.z;
   player.vx = 0; player.vz = 0;
-  player.health = PLAYER_BASE_HEALTH;
+  player.health = PLAYER.health;
   player.armor = 0;
   player.bustedState = false;
   player.wastedState = false;
@@ -337,7 +337,7 @@ function loadSavedGame(payload) {
   missionSetChainIndex(missions, payload.missionIndex || 0);
   missions.sideJobsDone = payload.sideJobsDone || 0;
   cash = payload.cash || 0;
-  player.health = payload.health ?? PLAYER_BASE_HEALTH;
+  player.health = payload.health ?? PLAYER.health;
   player.armor = payload.armor || 0;
   player.bustedState = false;
   player.wastedState = false;
@@ -648,7 +648,7 @@ function respawnAfterDeath() {
   const spot = hospital || city.landmarks[0];
   player.x = spot.x;
   player.z = spot.z + spot.d / 2 + 24;
-  player.health = PLAYER_BASE_HEALTH;
+  player.health = PLAYER.health;
   player.armor = 0;
   player.bustedState = false;
   player.wastedState = false;
@@ -1129,16 +1129,26 @@ let bootRan = false;
 function boot() {
   if (bootRan) return;
   bootRan = true;
-  if (shotName === 'cover' || shotName === 'driving' || shotName === 'chase' || shotName === 'mission') {
-    stagingShotName = shotName;
-    gameState = 'playing';
-    stageShot(shotName, STAGE); // runs its own 60 ticks, sets __shotReady, freezes the sim
-  } else if (shotName) {
-    // any other ?shot= name: the classic settle-and-freeze probe path
-    gameState = 'playing';
-  } else {
-    startNewGame();
-    openTitleMenu();
+  window.__bootDebug = { ran: true, shot: shotName || null, stage: 'enter' };
+  try {
+    if (shotName === 'cover' || shotName === 'driving' || shotName === 'chase' || shotName === 'mission') {
+      stagingShotName = shotName;
+      gameState = 'playing';
+      window.__bootDebug.stage = 'staging';
+      stageShot(shotName, STAGE); // runs its own 60 ticks, sets __shotReady, freezes the sim
+      window.__bootDebug.stage = 'staged';
+    } else if (shotName) {
+      // any other ?shot= name: the classic settle-and-freeze probe path
+      gameState = 'playing';
+      window.__bootDebug.stage = 'probe';
+    } else {
+      startNewGame();
+      window.__bootDebug.stage = 'newgame';
+      openTitleMenu();
+      window.__bootDebug.stage = 'title';
+    }
+  } catch (err) {
+    window.__bootDebug.error = String(err && err.stack || err);
   }
 }
 
