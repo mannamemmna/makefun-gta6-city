@@ -1,134 +1,83 @@
-// Boot and the one loop: input is read every frame, the world advances in fixed 1/60 s steps
-// (several in a slow frame, none in a fast one), and the renderer paints what is there. The game
-// moves between four screens: title, play, paused and game over.
-//
-// ?seed=N fixes the falling pattern. ?shot=start|play|end (with &seed=N) stages that scene
-// instead of running the loop, paints it twice and sets window.__shotReady for a screenshot.
-import { BEST_KEY, LIVES, STEP } from './config.js';
-import { createRandom } from './random.js';
-import { createWorld, EVENT_HIT, EVENT_OVER } from './world.js';
-import { ACTION_CONFIRM, ACTION_PAUSE, createInput } from './input.js';
-import { createRenderer, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
-import { stageShot } from './shots.js';
+// main.js — the boot stub for session 1: it wires the static world together and keeps the fixed
+// 1/60 tick running (rAF-led, with a setInterval heartbeat that catches up if rAF stalls), so the
+// city renders and the probe API is live while sessions 2-5 add the player, traffic, police,
+// missions and HUD on top. ?shot=name is parsed here and exposed as shotName; once staging lands
+// (a later session) it will freeze the pinned scene and set window.__shotReady, but for now any
+// ?shot= only freezes the world clock after a short settle so probes always render a static frame.
+import { STEP } from './config.js';
 
-/** The longest frame the loop catches up on; a longer stall (a hidden tab) is dropped, not replayed. */
-const MAX_FRAME = 0.25;
+import { createCity } from './city.js';
+import { createWorld, advanceWorldTicks } from './world.js';
+import { createRenderer, createCamera, updateCameraFollow } from './render.js';
+import { createInput } from './input.js';
 
 const params = new URLSearchParams(window.location.search);
-const shot = params.get('shot');
-const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
-const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() * 4294967296);
+export const shotName = params.get('shot'); // ?shot=start | drive | chase | mission ... (later)
+const SHOT_SETTLE_TICKS = 60; // the world turns one second, then holds for the camera
 
 const canvas = document.getElementById('game');
-const status = document.getElementById('status');
-const world = createWorld(createRandom(seed));
+const city = createCity();
+const world = createWorld();
 const renderer = createRenderer(canvas);
+const input = createInput(canvas);
 
-function readBest() {
-  try {
-    return Number.parseInt(window.localStorage.getItem(BEST_KEY) ?? '0', 10) || 0;
-  } catch {
-    return 0;
-  }
+const cam = createCamera(city.playerSpawn.x, city.playerSpawn.z);
+renderer.setCity(city);
+renderer.setCamera(cam);
+
+// The fixed tick: input is polled, the world clock advances, then the camera eases. Every
+// gameplay module later sessions add hooks this one place; tick(n) replays n of them exactly.
+function tickOnce() {
+  input.poll();
+  input.takeActions(); // drained here; session 2+ routes the flag bits
+  advanceWorldTicks(world, 1);
+  updateCameraFollow(cam, STEP * 4); // a slow drift onto the spawn; actors steer it later
+  return true;
 }
 
-function saveBest(value) {
-  try {
-    window.localStorage.setItem(BEST_KEY, String(value));
-  } catch {
-    // Storage can be off (private windows): the best score then lasts this visit only.
+// window.__game: the probe API the harness and the shot staging drive.
+window.__game = {
+  player: null, // session 2 sets the player actor here
+  wanted: null, // session 3 sets the wanted level state here
+  city,
+  world,
+  cam,
+  renderer,
+  input,
+  tick(n) {
+    const count = Number.isInteger(n) ? n : 1;
+    for (let i = 0; i < count; i += 1) tickOnce();
+    renderer.render(world, null);
+    return world.time;
+  },
+};
+
+window.__shotReady = false; // only a staged shot (added by a later session) ever sets this true
+
+// Let the shot settle a moment (the camera easing onto its focus), then freeze the clock so
+// probes and staged screenshots are pixel-identical run to run.
+let settleTicks = 0;
+function steppedFrame() {
+  if (settleTicks < SHOT_SETTLE_TICKS) {
+    tickOnce();
+    settleTicks += 1;
+    if (settleTicks >= SHOT_SETTLE_TICKS && shotName) {
+      // staged shot not implemented yet (a later session owns it): freeze, never signal ready
+    }
   }
+  renderer.render(world, null);
 }
 
-function runShot(name) {
-  const scene = stageShot(name, world);
-  let painted = 0;
-  function paint() {
-    renderer.draw(world.state, scene.screen, scene.best);
-    painted += 1;
-    if (painted < 2) requestAnimationFrame(paint);
-    else window.__shotReady = true;
-  }
-  requestAnimationFrame(paint);
-}
-
-function runGame() {
-  const input = createInput(canvas);
-  let screen = SCREEN_TITLE;
-  let best = readBest();
-  let accumulator = 0;
-  let last = performance.now();
-
-  // Screen readers (and anyone watching the page's text) hear the screen changes and each hit.
-  function announce(message) {
-    status.textContent = message;
-  }
-
-  function startGame() {
-    world.reset();
-    accumulator = 0;
-    screen = SCREEN_PLAY;
-    announce(`Playing. ${LIVES} lives.`);
-  }
-
-  function endGame() {
-    screen = SCREEN_OVER;
-    if (world.state.score > best) {
-      best = world.state.score;
-      saveBest(best);
-    }
-    announce(`Game over. Score ${world.state.score}. Best ${best}.`);
-  }
-
-  function handleActions() {
-    const actions = input.takeActions();
-    if (actions & ACTION_CONFIRM && (screen === SCREEN_TITLE || screen === SCREEN_OVER)) startGame();
-    else if (actions & ACTION_PAUSE && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
-      announce('Paused.');
-    } else if (actions & (ACTION_PAUSE | ACTION_CONFIRM) && screen === SCREEN_PAUSED) {
-      screen = SCREEN_PLAY;
-      announce('Playing.');
-    }
-  }
-
-  function step() {
-    if (screen === SCREEN_TITLE) {
-      world.step(STEP, 0, true);
-      return;
-    }
-    const events = world.step(STEP, input.direction(), false);
-    if (events & EVENT_OVER) endGame();
-    else if (events & EVENT_HIT) announce(world.state.lives === 1 ? 'Hit. 1 life left.' : `Hit. ${world.state.lives} lives left.`);
-  }
-
-  function frame(now) {
-    requestAnimationFrame(frame);
-    accumulator += Math.min((now - last) / 1000, MAX_FRAME);
-    last = now;
-    handleActions();
-    if (screen === SCREEN_TITLE || screen === SCREEN_PLAY) {
-      while (accumulator >= STEP && (screen === SCREEN_TITLE || screen === SCREEN_PLAY)) {
-        step();
-        accumulator -= STEP;
-      }
-    } else {
-      accumulator = 0;
-    }
-    renderer.draw(world.state, screen, best);
-  }
-
-  // Leaving the tab pauses a running game rather than letting blocks fall unseen.
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
-      announce('Paused.');
-    }
-  });
-
-  announce('Block Dodger. Press Space or click to start.');
+// The frame loop: rAF paints; a 33ms interval is the fallback heartbeat that keeps ticks and
+// paint coming when rAF is throttled (a hidden or backgrounded tab during a probe run).
+let rafAlive = false;
+function frame() {
+  rafAlive = true;
+  steppedFrame();
   requestAnimationFrame(frame);
 }
-
-if (shot) runShot(shot);
-else runGame();
+requestAnimationFrame(frame);
+setInterval(() => {
+  if (!rafAlive || document.hidden) steppedFrame();
+  rafAlive = false;
+}, 33);
