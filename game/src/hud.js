@@ -71,14 +71,16 @@ export function updateHud(hud, dt, cashNow) {
   if (hud.flash > 0) hud.flash -= dt * 2;
 }
 
-/** healthBar + armorBar: two heavy segmented meters, ~270px wide, sitting clear LEFT of the
- *  minimap plate so nothing collides at the bottom-right corner. */
+/** healthBar + armorBar: two heavy segmented meters stacked in the TOP-RIGHT column, directly
+ * under the wanted stars and the cash plate. The whole bottom row (weapon box left, objective
+ * panel centre, minimap right) stays collision-free — the previous bottom-of-screen placement
+ * put the bar straight through the objective panel's plate whenever both were on screen. */
 export function drawHealthArmorBars(ctx, health, armor) {
   const barX = VIEW.width - 320 - 260;
-  drawSegmentedBar(ctx, barX, VIEW.height - 96, 270, health / 100, 'HEALTH', GREEN, false);
+  drawSegmentedBar(ctx, barX, 176, 270, health / 100, 'HEALTH', GREEN, false);
   const armorFrac = armor / 100;
   if (armor > 0) {
-    drawSegmentedBar(ctx, barX, VIEW.height - 54, 270, armorFrac, 'ARMOR', BLUE, false);
+    drawSegmentedBar(ctx, barX, 220, 270, armorFrac, 'ARMOR', BLUE, false);
   }
 }
 
