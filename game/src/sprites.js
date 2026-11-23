@@ -105,6 +105,12 @@ export function paintCar(car, world, ambient) {
   const lit = ambientShade(ambient);
   return (ctx, p) => {
     if (!p.visible) return;
+    // viewport guard: the flash-fill rows can drift a few units past the culled road
+    // band; without this their sprites wrap outside the canvas and read, on a
+    // thumbnail, like cars parked on the rooftops along the frame edge
+    const vw = (ctx.canvas && ctx.canvas.width) || 1280;
+    const vh = (ctx.canvas && ctx.canvas.height) || 720;
+    if (p.sx < -14 || p.sy < -14 || p.sx > vw + 18 || p.sy > vh + 18) return;
     const s = 1.0;
     const cos = Math.cos(car.heading), sin = Math.sin(car.heading);
     // ground shadow: car footprint skewed along the heading

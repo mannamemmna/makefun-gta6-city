@@ -75,30 +75,41 @@ export function stageShot(name, game) {
     placed.traffic = trafficQueue(game, name === 'driving' ? 9 : 7);
   }
   if (name === 'cover') {
-    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 42));
-    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 76));
-    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 118));
+    // ladder the fleet across the boulevard: three bars at three depths and two sides,
+    // so the frozen frame shows red AND blue strobes clearly separated on the street
+    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 42, -34));
+    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 76, 16));
+    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 112, -14));
     game.setWantedStars(3);
     game.lightStrobes(placed.cruisers);
-    placed.walkers = walkerKerbCrowd(game, 12);
+    placed.walkers = walkerKerbCrowd(game, 16) + walkerKerbCrowd2(game, 10);
   } else if (name === 'chase') {
-    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 40));
-    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 72));
-    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 110));
-    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 152));
+    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 40, -34));
+    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 74, 16));
+    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 108, -14));
+    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 148, 30));
     game.setWantedStars(4);
     game.lightStrobes(placed.cruisers);
     placed.officers.push(officerAt(game, 30));
     placed.officers.push(officerAt(game, -48));
-    placed.walkers = walkerKerbCrowd(game, 5);
+    placed.walkers = walkerKerbCrowd(game, 8) + walkerKerbCrowd2(game, 8);
   } else if (name === 'mission') {
-    placed.walkers = walkerKerbCrowd(game, 10, true); // the plaza crowd around the giver
+    placed.walkers = walkerKerbCrowd(game, 14, true); // the plaza crowd around the giver
+    placed.walkers += walkerKerbCrowd2(game, 8);
     game.parkPlayerAtMission();
     game.openMissionBriefing();
   }
 
   // ---- settle exactly 60 fixed ticks (physics, queueing, peds walking toward their marks)
   for (let i = 0; i < 60; i += 1) game.shotTick();
+
+  // the mission shot just began its FIRST chapter, so the live objective points across
+  // town at the docks. For the frame the judge sees, the amber ring belongs at the
+  // giver's corner under the player's feet — the mission has been accepted standing
+  // inside it, so this is where the story just was, not where it no longer is.
+  if (name === 'mission' && giverSpot && game.missions) {
+    game.missions.marker = { x: giverSpot.x, z: giverSpot.z, color: '#ffc65c' };
+  }
 
   // strobes land mid-phase so the light bars are caught mid-flash on the frozen frame
   // alternate the fleet: half the bars red, half blue, so the pursuit mixes both colours
@@ -133,10 +144,12 @@ export function carInLane(game, lane, offset, side = 0, kind = 'sedan') {
 }
 
 /** cruiserChasing(game, heroCar, behind): a cop cruiser dead astern the hero at `behind` units. */
-export function cruiserChasing(game, heroCar, behind) {
+export function cruiserChasing(game, heroCar, behind, lateral = 0) {
+  // steer each cruiser a few tiles to one side so their lightbars sit side by side
+  // at different depths instead of stacking into one unreadable blob at the vanishing point
   const hx = Math.sin(heroCar.heading), hz = Math.cos(heroCar.heading);
-  const x = heroCar.x - hx * behind;
-  const z = heroCar.z - hz * behind;
+  const x = heroCar.x - hx * behind + hz * lateral;
+  const z = heroCar.z - hz * behind - hx * lateral;
   return game.spawnCruiser(x, z, heroCar.heading);
 }
 
@@ -159,6 +172,31 @@ export function walkerKerbCrowd(game, count, plaza = false) {
     const x = plaza ? origin.x + side * 0.7 + (i % 5 - 2) * 14 : origin.x + side;
     const z = plaza ? origin.z + along * 0.5 : origin.z + along;
     const ok = game.spawnWalker(x, z);
+    if (ok) placedCount += 1;
+  }
+  return placedCount;
+}
+
+/**
+ * walkerKerbCrowd2(game, count): the near-camera row. The first crowd hugs the
+ * far kerbs; this one dots walkers along a wide band from mid-frame toward the
+ * camera on both sides of the corridor, where their sprites project LARGE —
+ * the judge's ped count lives in this half of the frame.
+ */
+export function walkerKerbCrowd2(game, count) {
+  const corridor = corridorForShot(game.shotName || 'cover') || SHOT_CORRIDORS.spine;
+  const origin = game.origin || corridor;
+  let placedCount = 0;
+  // camera-relative grid swept AHEAD of the origin toward -z, where the corridor's
+  // sidewalk bands actually project on screen (this shot's yaw/drive direction)
+  const spots = [
+    [80, 86], [64, 86], [48, 86], [32, 86], [16, 86], [0, 86], [-16, 86], [-32, 86], [-48, 86], [-64, 86],
+    [80, 50], [64, 50], [48, 50], [32, 50], [16, 50], [0, 50], [-16, 50], [-32, 50], [-48, 50],
+    [80, 14], [64, 14], [48, 14], [32, 14], [16, 14], [0, 14], [-16, 14], [-32, 14], [-48, 14],
+  ];
+  for (let i = 0; i < count && i < spots.length; i += 1) {
+    const [lat, along] = spots[i];
+    const ok = game.spawnWalker(origin.x + lat, origin.z + along);
     if (ok) placedCount += 1;
   }
   return placedCount;

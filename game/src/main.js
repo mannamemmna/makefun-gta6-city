@@ -7,7 +7,7 @@
 // Sessions 3-5 add missions, HUD and shot staging on top of the same tickOnce() gate below.
 import { STEP, TRAFFIC, CAMERA, PLAYER, VIEW, WANTED } from './config.js';
 
-import { createCity, laneCenters, isWalkable, boxHitsBuilding } from './city.js';
+import { createCity, laneCenters, isWalkable, boxHitsBuilding, collidersNear } from './city.js';
 import { createWorld, advanceWorldTicks, ambientLevel } from './world.js';
 import {
   createRenderer, createCamera, updateCameraFollow, cameraFocusOn, cameraRelease, setCameraZoom,
@@ -729,12 +729,49 @@ function buildScene(worldRef, ambient) {
   const drawables = [];
   const add = (x, z, paint, y = 0) => drawables.push({ x, z, y, paint });
 
-  for (const car of traffic.cars) add(car.x, car.z, paintCar(car, worldRef, ambient));
-  for (const car of police.cruisers) add(car.x, car.z, paintCar(car, worldRef, ambient));
+  // Occlusion cull, take two — screen-space and exact: a ground-level car whose
+  // projected base point lands INSIDE a building's roof quad paints the roof, and
+  // at thumbnail size that reads as a car parked on the roofline: a glitch the
+  // staged shots must not ship. Cars legitimately in FRONT of a facade project
+  // below the roof quad and stay; the lost ones were exactly the roof-riders.
+  const roofQuads = [];
+  for (const b of city.buildings) {
+    if (b.h < 14) continue; // flat props never project a readable roof
+    const r0 = renderer.projectTo(b.x, b.h, b.z, VIEW.width, VIEW.height);
+    if (!r0.visible) continue;
+    const r1 = renderer.projectTo(b.x + b.w, b.h, b.z, VIEW.width, VIEW.height);
+    const r2 = renderer.projectTo(b.x + b.w, b.h, b.z + b.d, VIEW.width, VIEW.height);
+    const r3 = renderer.projectTo(b.x, b.h, b.z + b.d, VIEW.width, VIEW.height);
+    roofQuads.push([r0, r1, r2, r3]);
+  }
+  const pointInRoofs = (sx, sy) => {
+    for (const q of roofQuads) {
+      let inside = false;
+      for (let i = 0, j = 3; i < 4; j = i, i += 1) {
+        const a = q[j], c = q[i];
+        if ((a.sy > sy) !== (c.sy > sy)
+          && sx < ((c.sx - a.sx) * (sy - a.sy)) / (c.sy - a.sy || 1e-9) + a.sx) inside = !inside;
+      }
+      if (inside) return true;
+    }
+    return false;
+  };
+  const carBlockedByTower = (car) => {
+    const p = renderer.projectTo(car.x, 0, car.z, VIEW.width, VIEW.height);
+    return p.visible && pointInRoofs(p.sx, p.sy);
+  };
+  const pedBlockedByRoof = (ped) => {
+    const p = renderer.projectTo(ped.x, 0, ped.z, VIEW.width, VIEW.height);
+    return p.visible && pointInRoofs(p.sx, p.sy);
+  };
   if (!player.inCar) add(player.x, player.z, paintPlayer(player));
-
+  for (const car of traffic.cars) if (!carBlockedByTower(car)) add(car.x, car.z, paintCar(car, worldRef, ambient));
+  for (const car of police.cruisers) if (!carBlockedByTower(car)) add(car.x, car.z, paintCar(car, worldRef, ambient));
+  // walkers stranded inside a roof quad (a ped's sidewalk tile can sit under a
+  // podium's overhang) paint the roof exactly like the cars did — same cull
   for (const ped of peds.peds) {
     if (ped.state === 'gone') continue;
+    if (pedBlockedByRoof(ped)) continue;
     add(ped.x, ped.z, paintPedestrian(ped, worldRef, ambient));
   }
   for (const officer of police.officers) {
@@ -983,6 +1020,7 @@ const STAGE = {
   spawnParkedKerbCar: stageSpawnParkedKerbCar,
   parkPlayerAtMission,
   openMissionBriefing: stageOpenBriefing,
+  get missions() { return missions; },
   giverSpot: () => {
     const giver = missionGiver(missions);
     return giver ? { x: giver.x, z: giver.z } : null;
