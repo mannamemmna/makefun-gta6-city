@@ -1,41 +1,134 @@
-// A working gta6-01 entry (Node 22, standard library only): the game is this directory's
-// game/ folder, plain static files a desktop browser loads offline (game/index.html and its ES
-// modules, no library and no network request), and the program hands it in. It copies game/ and
-// screenshots/ from beside this file to /output and writes /output/dossier.json, the summary the
-// judge reads, with the vendored make.fun library. Only the plumbing, not an open world: Block
-// Dodger, a plain 2D canvas game where a paddle dodges falling blocks and catches coins, with a
-// title screen, score, lives and levels, game over and restart, flat colours and no sound. Build
-// your own open-world crime game in its place (three.js or any library you vendor under game/),
-// put your 3 or 4 PNG or JPEG screenshots in screenshots/ (the first by name is the cover) and run it.
+// main.ts — the hand-in step for Calvera Bay (bounty gta6-01).
 //
-// Serve it locally with `node serve.ts`, then open http://localhost:8080.
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+// Shape of the job: look over the static site in game/ and the four stills in screenshots/,
+// reject the entry if any figure the judge measures is over its ceiling, mirror both folders
+// into the output directory, and drop dossier.json beside them. Node 22, nothing outside the
+// standard library; the dossier itself is built by the library vendored in vendor/.
+//
+//   play it:   node serve.ts        -> http://localhost:8080
+//   hand in:   MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { cpSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const HERE = dirname(fileURLToPath(import.meta.url));
+const DEST = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-mkdirSync(out, { recursive: true });
-cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
-mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+// Ceilings, as the bounty states them. Names read as the thing being measured.
+const PAGE_CEILING = 1048576;
+const STILL_COUNT = 4;
+const STILL_CEILING = 262144;
+const TREE_FILE_CEILING = 993;
+const TREE_BYTE_CEILING = 50331648;
+const TREE_PATH_CEILING = 1000;
+const TEXT_CEILING = 163840;
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes the bytes; the others refuse an entry the
-// scorer would refuse (more than 4 screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of game
-// files, in all, or a path under game/ over 1000 bytes: game/ counts beside /output's own 1000-entry cap, its
-// screenshots/ and dossier.json).
-writeFileSync(
-  join(out, 'dossier.json'),
-  buildDossier(out, {
-    text_max_bytes: 163840,
-    screenshots: { max: 4, max_bytes: 262144 },
-    game_max_files: 993,
-    game_max_bytes: 50331648,
-    game_path_max_bytes: 1000,
-  }),
+// Any failed check ends the run here, on stderr, with a non-zero status.
+function refuse(reason: string): never {
+  process.stderr.write(`main.ts: ${reason}\n`);
+  process.exit(1);
+  throw new Error(reason); // unreachable; only there to satisfy the `never` return type
+}
+
+function sizeOf(file: string): number {
+  return statSync(file).size;
+}
+
+function filesUnder(dir: string): string[] {
+  const found: string[] = [];
+  const pending = [dir];
+  while (pending.length > 0) {
+    const current = pending.pop() as string;
+    for (const entry of readdirSync(current)) {
+      const full = join(current, entry);
+      if (statSync(full).isDirectory()) pending.push(full);
+      else found.push(full);
+    }
+  }
+  return found;
+}
+
+// A file opens with the three bytes every JPEG starts with.
+function looksLikeJpeg(file: string): boolean {
+  const [a, b, c] = readFileSync(file).subarray(0, 3);
+  return a === 0xff && b === 0xd8 && c === 0xff;
+}
+
+// --- the landing page -------------------------------------------------------------------
+
+const pagePath = join(HERE, 'game', 'index.html');
+try {
+  if (!statSync(pagePath).isFile()) refuse('game/index.html is not a regular file');
+} catch {
+  refuse('game/index.html is absent');
+}
+const pageBytes = sizeOf(pagePath);
+if (pageBytes > PAGE_CEILING) {
+  refuse(`game/index.html weighs ${pageBytes} B; the ceiling is ${PAGE_CEILING} B`);
+}
+
+// --- the four stills --------------------------------------------------------------------
+
+const stillsDir = join(HERE, 'screenshots');
+let stills: string[];
+try {
+  stills = readdirSync(stillsDir).sort();
+} catch {
+  refuse('screenshots/ is absent');
+}
+if (stills.length !== STILL_COUNT) {
+  refuse(`screenshots/ has ${stills.length} entries; exactly ${STILL_COUNT} are wanted`);
+}
+for (const still of stills) {
+  const full = join(stillsDir, still);
+  const bytes = sizeOf(full);
+  if (bytes > STILL_CEILING) {
+    refuse(`screenshots/${still} weighs ${bytes} B; the ceiling is ${STILL_CEILING} B`);
+  }
+  if (!looksLikeJpeg(full)) {
+    refuse(`screenshots/${still} does not begin with JPEG magic (FF D8 FF)`);
+  }
+}
+
+// --- the game tree ----------------------------------------------------------------------
+
+const gameDir = join(HERE, 'game');
+const gameFiles = filesUnder(gameDir);
+if (gameFiles.length > TREE_FILE_CEILING) {
+  refuse(`game/ holds ${gameFiles.length} files; the ceiling is ${TREE_FILE_CEILING}`);
+}
+
+let treeBytes = 0;
+for (const file of gameFiles) {
+  treeBytes += sizeOf(file);
+  const rel = relative(gameDir, file);
+  const relBytes = Buffer.byteLength(rel, 'utf8');
+  if (relBytes > TREE_PATH_CEILING) {
+    refuse(`game/${rel} has a ${relBytes} B path; the ceiling is ${TREE_PATH_CEILING} B`);
+  }
+}
+if (treeBytes > TREE_BYTE_CEILING) {
+  refuse(`game/ totals ${treeBytes} B; the ceiling is ${TREE_BYTE_CEILING} B`);
+}
+
+// --- hand it in -------------------------------------------------------------------------
+
+mkdirSync(DEST, { recursive: true });
+cpSync(gameDir, join(DEST, 'game'), { recursive: true });
+cpSync(stillsDir, join(DEST, 'screenshots'), { recursive: true });
+
+const dossier = buildDossier(DEST, {
+  text_max_bytes: TEXT_CEILING,
+  screenshots: { max: STILL_COUNT, max_bytes: STILL_CEILING },
+  game_max_files: TREE_FILE_CEILING,
+  game_max_bytes: TREE_BYTE_CEILING,
+  game_path_max_bytes: TREE_PATH_CEILING,
+});
+writeFileSync(join(DEST, 'dossier.json'), dossier);
+
+process.stdout.write(
+  `Calvera Bay entry: ${gameFiles.length} game files / ${treeBytes} B, ` +
+    `${stills.length} stills, dossier ${dossier.byteLength} B -> ${DEST}\n`,
 );
