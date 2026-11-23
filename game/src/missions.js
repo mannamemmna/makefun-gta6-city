@@ -78,10 +78,12 @@ function buildChainMissions(city) {
 }
 
 /** The missions system: the chain index, the live run, the marker and the side jobs. */
-export function createMissions(city, seed = 3313) {
+export function createMissions(city, seed = 3313, cars, police) {
   return {
     city,
     rng: new Rng(seed),
+    cars: cars || [], // the shared traffic list the mission cars join (broker sedan, plates car)
+    police,
     chain: buildChainMissions(city),
     chainIndex: 0, // 0..5: the next chapter to hand out
     state: 'idle', // 'idle' | 'active'
@@ -150,7 +152,7 @@ function beginMission(missions, player) {
   missions.showBriefing = true;
   missions.tailProgress = 0; missions.tailBrokenFor = 0; missions.escapeBurn = 0;
   missions.car = null;
-  armStep(missions, player);
+  armStep(missions, player, missions.police);
   return chapter;
 }
 

@@ -25,8 +25,8 @@ const MISSION_MINUTES = 17 * 60 + 25; // golden hour, the hour the game opens in
  * cruisers behind it read as the subject instead of specks in a wide city grid.
  */
 const SHOT_CORRIDORS = {
-  spine: { x: 8 * 8 * TILE, z: 11 * 8 * TILE + 45, yaw: 0.60, zoom: 1.85 },
-  harbour: { x: 12 * 8 * TILE, z: 26 * 8 * TILE + 40, yaw: 0.60, zoom: 2.0 },
+  spine: { x: 8 * 8 * TILE, z: 11 * 8 * TILE + 45, yaw: 0.60, zoom: 2.65 },
+  harbour: { x: 12 * 8 * TILE, z: 26 * 8 * TILE + 40, yaw: 0.60, zoom: 2.5 },
 };
 
 export const SHOT_SCENES = ['cover', 'driving', 'chase', 'mission'];
@@ -75,16 +75,17 @@ export function stageShot(name, game) {
     placed.traffic = trafficQueue(game, name === 'driving' ? 9 : 7);
   }
   if (name === 'cover') {
-    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 62));
-    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 108));
+    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 42));
+    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 76));
+    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 118));
     game.setWantedStars(3);
     game.lightStrobes(placed.cruisers);
-    placed.walkers = walkerKerbCrowd(game, 8);
+    placed.walkers = walkerKerbCrowd(game, 12);
   } else if (name === 'chase') {
-    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 58));
-    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 96));
-    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 150));
-    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 190));
+    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 40));
+    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 72));
+    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 110));
+    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 152));
     game.setWantedStars(4);
     game.lightStrobes(placed.cruisers);
     placed.officers.push(officerAt(game, 30));

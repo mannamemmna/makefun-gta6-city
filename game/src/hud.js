@@ -71,12 +71,14 @@ export function updateHud(hud, dt, cashNow) {
   if (hud.flash > 0) hud.flash -= dt * 2;
 }
 
-/** healthBar + armorBar: two heavy segmented meters, ~270px wide, stacked bottom-left. */
+/** healthBar + armorBar: two heavy segmented meters, ~270px wide, sitting clear LEFT of the
+ *  minimap plate so nothing collides at the bottom-right corner. */
 export function drawHealthArmorBars(ctx, health, armor) {
-  drawSegmentedBar(ctx, VIEW.width - 320, VIEW.height - 96, 270, health / 100, 'HEALTH', GREEN, false);
+  const barX = VIEW.width - 320 - 260;
+  drawSegmentedBar(ctx, barX, VIEW.height - 96, 270, health / 100, 'HEALTH', GREEN, false);
   const armorFrac = armor / 100;
   if (armor > 0) {
-    drawSegmentedBar(ctx, VIEW.width - 320, VIEW.height - 54, 270, armorFrac, 'ARMOR', BLUE, false);
+    drawSegmentedBar(ctx, barX, VIEW.height - 54, 270, armorFrac, 'ARMOR', BLUE, false);
   }
 }
 
@@ -118,7 +120,7 @@ export function drawCashCounter(ctx, hud, cashNow) {
   const text = `$${String(shown).padStart(6, '0')}`;
   ctx.font = '800 30px system-ui, sans-serif';
   const w = ctx.measureText(text).width + 30;
-  const x = VIEW.width - w - 18, y = 64;
+  const x = VIEW.width - w - 18, y = 132; // below the star plate, never overlapped by it
   ctx.fillStyle = INK;
   ctx.fillRect(x, y - 34, w, 48);
   ctx.strokeStyle = PLATE_EDGE;

@@ -76,7 +76,7 @@ peds.isWalkable = (x, z) => isWalkable(city, x, z);
 const player = createPlayer(city.playerSpawn.x, city.playerSpawn.z);
 const police = createPolice(city, 909);
 const combat = createCombat(20260);
-const missions = createMissions(city, police, peds, traffic);
+const missions = createMissions(city, 3313, traffic.cars, police);
 
 // ---------------------------------------------------------------- game state machine
 // 'title' | 'playing' | 'paused' | 'dead' (busted or wasted, ENTER respawns) | 'won'
@@ -98,6 +98,11 @@ function syncCarPool() {
   carPool.length = 0;
   for (const car of traffic.cars) carPool.push(car);
   for (const car of police.cruisers) carPool.push(car);
+  // the mission vehicles live in the traffic list too (broker sedan, plates car), but a
+  // probe-started chapter may have spawned when traffic recycled: pool them defensively
+  if (missions.car && missions.car !== player.inCar && carPool.indexOf(missions.car) < 0) {
+    carPool.push(missions.car);
+  }
   if (player.inCar && carPool.indexOf(player.inCar) < 0) carPool.push(player.inCar);
 }
 
