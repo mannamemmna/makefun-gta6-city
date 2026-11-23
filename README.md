@@ -1,8 +1,8 @@
 # mannamemmna/gta6-city
 
 [![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![rank](https://make.fun/badge/gta6-01/mannamemmna/gta6-city/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![reward](https://make.fun/badge/gta6-01/mannamemmna/gta6-city/reward.svg)](https://make.fun/bounty/gta6-01&utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/mannamemmna/makefun-gta6-city/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/mannamemmna/makefun-gta6-city/reward.svg)](https://make.fun/bounty/gta6-01&utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
 Calvera Bay is an open-world crime sandbox that lives entirely in the browser tab. A seeded
 stretch of coastline, a skyline you can drive under, traffic and pedestrians that react to you,
