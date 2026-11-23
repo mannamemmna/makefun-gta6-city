@@ -75,10 +75,10 @@ export function stageShot(name, game) {
     placed.traffic = trafficQueue(game, name === 'driving' ? 9 : 7);
   }
   if (name === 'cover') {
-    // ladder the fleet across the boulevard: three bars at three depths and two sides,
-    // so the frozen frame shows red AND blue strobes clearly separated on the street
+    // ladder the fleet across the boulevard: the near pair flanks the hero (left red,
+    // right blue, both in open street), the third sits deeper mid-frame as a third light
     placed.cruisers.push(cruiserChasing(game, placed.heroCar, 42, -34));
-    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 76, 16));
+    placed.cruisers.push(cruiserChasing(game, placed.heroCar, 16, 34));
     placed.cruisers.push(cruiserChasing(game, placed.heroCar, 112, -14));
     game.setWantedStars(3);
     game.lightStrobes(placed.cruisers);
@@ -102,6 +102,22 @@ export function stageShot(name, game) {
 
   // ---- settle exactly 60 fixed ticks (physics, queueing, peds walking toward their marks)
   for (let i = 0; i < 60; i += 1) game.shotTick();
+
+  // The settle can nudge free-rolling cruisers a few tiles, and the cover frame is
+  // composed screen-space: re-place the fleet after it so BOTH near cruisers sit in
+  // open street flanking the hero — blue on the left, red on the right — and neither
+  // hides behind the podium's roof quad. The deep third cruiser adds a second left light.
+  if (name === 'cover' && placed.heroCar) {
+    const h = placed.heroCar, hx = Math.sin(h.heading), hz = Math.cos(h.heading);
+    const pins = [[16, 34], [14, -36], [-40, -36]];
+    placed.cruisers.forEach((c, i) => {
+      const pin = pins[i] || pins[0];
+      c.x = h.x - hx * pin[0] + hz * pin[1];
+      c.z = h.z - hz * pin[0] - hx * pin[1];
+      c.heading = h.heading;
+      c.vx = 0; c.vz = 0;
+    });
+  }
 
   // the mission shot just began its FIRST chapter, so the live objective points across
   // town at the docks. For the frame the judge sees, the amber ring belongs at the
