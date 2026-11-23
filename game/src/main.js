@@ -5,12 +5,12 @@
 // action bits route to enter/exit and weapon swaps, and ?shot= still freezes the clock after 60
 // settle ticks so probes and staged screenshots are pixel-identical.
 // Sessions 3-5 add missions, HUD and shot staging on top of the same tickOnce() gate below.
-import { STEP, TRAFFIC, CAMERA, PLAYER } from './config.js';
+import { STEP, TRAFFIC, CAMERA, PLAYER, VIEW, WANTED } from './config.js';
 
 import { createCity, laneCenters, isWalkable, boxHitsBuilding } from './city.js';
 import { createWorld, advanceWorldTicks, ambientLevel } from './world.js';
 import {
-  createRenderer, createCamera, updateCameraFollow, cameraFocusOn, setCameraZoom,
+  createRenderer, createCamera, updateCameraFollow, cameraFocusOn, cameraRelease, setCameraZoom,
 } from './render.js';
 import {
   createInput, ACTION_ENTER_EXIT, ACTION_WEAPON_NEXT, ACTION_WEAPON_1, ACTION_WEAPON_2, ACTION_WEAPON_3,
@@ -19,6 +19,7 @@ import {
 import { clamp, dist2, wrapAngle, angleDelta, Rng } from './util.js';
 import {
   updateVehicle, enterCar, exitCar, doorPosition, separateVehicles, damageCar, vehicleSpeed,
+  createVehicle, explodeCar,
 } from './vehicles.js';
 import {
   createTraffic, trafficSpawn, updateTraffic, trafficDensity, nearestCarTo, registerCarPool, fleeTraffic,
@@ -26,13 +27,14 @@ import {
 } from './traffic.js';
 import {
   createPedestrians, updatePedestrians, pedestrianDensity, panicPedsNear, runOver, pedestrianSpawnTopUp,
-  pedestrianWarmUp,
+  pedestrianWarmUp, pedestrianSpawnAt,
 } from './pedestrians.js';
 import {
   createPlayer, updatePlayer, currentWeapon, tryFireWeapon, cycleWeapon, damagePlayer,
 } from './player.js';
 import {
   createPolice, updatePolice, reportWitnessCrime, CRIME_HEAT, damageOfficer, loseHeatBar, wantedLevelStars,
+  spawnFootOfficer, spawnPoliceCruiser,
 } from './police.js';
 import { createCombat, updateCombat, bulletTracers, spawnSparks, spawnBullet } from './combat.js';
 import {
@@ -733,13 +735,20 @@ function buildScene(worldRef, ambient) {
   for (const tracer of bulletTracers(combat)) add(tracer.x, tracer.z, paintTracer(tracer), tracer.y);
   for (const flash of combat.muzzleFlashes) add(flash.x, flash.z, paintMuzzleFlash(flash), 10);
   for (const spark of combat.sparks) add(spark.x, spark.z, paintSpark(spark), spark.y);
+  // the mission marker rides the ground under everything HUD: ring + cross at the blip
+  const marker = missions.marker
+    || ((missions.state !== 'active' && missions.chainIndex < missions.chain.length) ? missionGiver(missions) : null);
+  if (marker) {
+    const mcolor = missions.marker ? missions.marker.color : '#ffc65c';
+    add(marker.x, marker.z, (c, p) => paintGroundMarker(c, p, mcolor), 0);
+  }
   return { drawables };
 }
 
 /** Mission ground marker: a bold amber ring + cross on the target, so the shot reads. */
 function paintGroundMarker(ctx, p, color) {
   if (!p.visible) return;
-  const r = 26;
+  const r = 22 + (cam.zoom - 1) * 30; // grows with the camera's zoom: big in cutaways
   const pulse = 0.72 + 0.28 * Math.sin(world.time * 0.14);
   ctx.save();
   ctx.globalAlpha = 0.55 * pulse + 0.35;
@@ -865,8 +874,8 @@ function drawBriefingCard(ctx, chapter) {
 /** drawTitleMenu adapter: the big title, the pulsing ENTER, the lit rows. */
 function drawTitleMenu(ctx, stateObj, blinkOn, tickCount) {
   if (!stateObj) return;
-  const t = tickCount % 80;
-  drawTitleFrame(ctx, stateObj, t < 48);
+  // deterministic 48-on/32-off blink from the menu epoch, plus the sine pulse inside menus.js
+  drawTitleFrame(ctx, stateObj, (tickCount % 80) < 48, tickCount);
 }
 
 /** drawBannerOverlay: route the passed/failed card through menus.js's shared lettering. */
@@ -961,8 +970,13 @@ const STAGE = {
   spawnOfficer: stageSpawnOfficer,
   spawnWalker: stageSpawnWalker,
   spawnTrafficCar: stageSpawnTrafficCar,
+  spawnParkedKerbCar: stageSpawnParkedKerbCar,
   parkPlayerAtMission,
   openMissionBriefing: stageOpenBriefing,
+  giverSpot: () => {
+    const giver = missionGiver(missions);
+    return giver ? { x: giver.x, z: giver.z } : null;
+  },
 };
 
 /** stageShot boot path: freeze the loop's own ticking; staging runs its 60 ticks itself. */
@@ -1045,6 +1059,21 @@ function stageSpawnTrafficCar(x, z, heading) {
   car.cruise = 58; // the queue looks dense, not highway fast
   car.vx = Math.sin(heading) * 40;
   car.vz = Math.cos(heading) * 40;
+  STAGE.__stageCars = STAGE.__stageCars || [];
+  STAGE.__stageCars.push(car);
+  traffic.cars.push(car);
+  return car;
+}
+
+/**
+ * stageSpawnParkedKerbCar: a driverless body at the kerb. Parked cars never join the
+ * panic flow (traffic only steers cars with a driver), so the night chase street keeps
+ * its parked rows no matter how hot the pursuit gets.
+ */
+function stageSpawnParkedKerbCar(x, z, heading) {
+  const car = createVehicle(city, x, z, heading, 'sedan', stageRng);
+  car.driver = null;
+  car.vx = 0; car.vz = 0;
   STAGE.__stageCars = STAGE.__stageCars || [];
   STAGE.__stageCars.push(car);
   traffic.cars.push(car);

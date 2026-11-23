@@ -21,11 +21,12 @@ const MISSION_MINUTES = 17 * 60 + 25; // golden hour, the hour the game opens in
  * The named camera corridors. Coordinates come from the city grid: the spine boulevard runs
  * north-south at block x=8 (a two-tile road), the harbour corner sits where the southeast
  * quays meet the water (the pier + dock signage at high z). Yaws pick the direction that
- * puts the corridor's depth down-screen; zoom widens or tightens the frame.
+ * puts the corridor's depth down-screen; zoom tightens the frame so the hero's car and the
+ * cruisers behind it read as the subject instead of specks in a wide city grid.
  */
 const SHOT_CORRIDORS = {
-  spine: { x: 8 * 8 * TILE, z: 11 * 8 * TILE + 45, yaw: 0.60, zoom: 1.15 },
-  harbour: { x: 12 * 8 * TILE, z: 26 * 8 * TILE + 40, yaw: 0.60, zoom: 1.2 },
+  spine: { x: 8 * 8 * TILE, z: 11 * 8 * TILE + 45, yaw: 0.60, zoom: 1.85 },
+  harbour: { x: 12 * 8 * TILE, z: 26 * 8 * TILE + 40, yaw: 0.60, zoom: 2.0 },
 };
 
 export const SHOT_SCENES = ['cover', 'driving', 'chase', 'mission'];
@@ -56,8 +57,15 @@ export function stageShot(name, game) {
   // ---- placements (all deterministic: fixed offsets around the corridor origin)
   const placed = { heroCar: null, cruisers: [], officers: [], walkers: 0, traffic: 0, name, corridor: (name === 'cover' || name === 'driving') ? 'spine' : 'harbour' };
 
+  // the mission shot stages at the FIXER'S corner, not at the harbour: the briefing card
+  // has to open over the marker the player is actually standing on
+  const giverSpot = name === 'mission' ? game.giverSpot() : null;
+  const origin = giverSpot
+    ? { x: giverSpot.x, z: giverSpot.z, yaw: corridor.yaw, zoom: 1.7 }
+    : corridor;
+
   // the camera locks on the corridor origin FIRST: placement helpers read game.origin
-  game.lockCamera(corridor.x, corridor.z, corridor.yaw, corridor.zoom);
+  game.lockCamera(origin.x, origin.z, origin.yaw, origin.zoom);
 
   if (name !== 'mission') {
     // the hero behind the wheel of a stolen sedan, center of the corridor
@@ -82,8 +90,6 @@ export function stageShot(name, game) {
     placed.officers.push(officerAt(game, 30));
     placed.officers.push(officerAt(game, -48));
     placed.walkers = walkerKerbCrowd(game, 5);
-    game.fireMuzzleFlash(); // tracers in flight for the night pursuit
-    game.fireMuzzleFlash();
   } else if (name === 'mission') {
     placed.walkers = walkerKerbCrowd(game, 10, true); // the plaza crowd around the giver
     game.parkPlayerAtMission();
@@ -94,7 +100,16 @@ export function stageShot(name, game) {
   for (let i = 0; i < 60; i += 1) game.shotTick();
 
   // strobes land mid-phase so the light bars are caught mid-flash on the frozen frame
-  for (const cruiser of placed.cruisers) cruiser.lightPhase = 4;
+  // alternate the fleet: half the bars red, half blue, so the pursuit mixes both colours
+  let strobeIdx = 0;
+  for (const cruiser of placed.cruisers) cruiser.lightPhase = (strobeIdx++ % 2 === 0) ? 4 : 10;
+
+  // fresh muzzle flashes AFTER the settle: their ttl is ~3 ticks, so anything fired
+  // during it had already died — the chase frame shows bursts blooming mid-flight
+  if (name === 'chase') {
+    game.fireMuzzleFlash();
+    game.fireMuzzleFlash();
+  }
   if (name === 'chase' || name === 'cover') game.reflashMuzzles();
 
   game.shotFreeze();
@@ -148,7 +163,12 @@ export function walkerKerbCrowd(game, count, plaza = false) {
   return placedCount;
 }
 
-/** trafficQueue(game, perLane): queue rows of moving traffic down both flanking lanes. */
+/**
+ * trafficQueue(game, perLane): queue rows of moving traffic down both flanking lanes.
+ * For the night chase the streets sit under a 4-star panic radius (everything with a
+ * driver flees the frame within a few ticks), so the chase also plants parked cars at
+ * the kerb: driverless bodies stay put, and a street never reads empty mid-pursuit.
+ */
 export function trafficQueue(game, perLane = 7) {
   const corridor = corridorForShot(game.shotName || 'driving') || SHOT_CORRIDORS.spine;
   const origin = game.origin || corridor;
@@ -160,6 +180,17 @@ export function trafficQueue(game, perLane = 7) {
       const z = origin.z + along;
       const ok = game.spawnTrafficCar(x, z, side > 0 ? Math.PI : 0);
       if (ok) placedCount += 1;
+    }
+  }
+  let parkedCount = 0;
+  if (game.shotName === 'chase') {
+    // kerbside rows just outside the panic flow: parked, nobody aboard
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 5; i += 1) {
+        const along = -190 + i * 88 + (side > 0 ? 30 : 0);
+        game.spawnParkedKerbCar(origin.x + side * 34, origin.z + along, side > 0 ? Math.PI : 0);
+        parkedCount += 1;
+      }
     }
   }
   return placedCount;

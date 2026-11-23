@@ -174,6 +174,7 @@ function trafficCarsNear(city, me) {
  * hashed from (laneSeed, intersection) so the same traffic always takes the same routes.
  */
 function maybeTurnAtIntersection(traffic, car) {
+  if (!car.lane) return; // mission cars and staged props ride fixed lines, not the lane graph
   const grid = BLOCK_TILES * TILE;
   const along = car.lane.axis === 'x' ? car.x : car.z;
   const idx = Math.floor((along - 8) / grid);

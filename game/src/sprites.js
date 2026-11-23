@@ -159,15 +159,28 @@ export function paintCar(car, world, ambient) {
     // THE LIGHT BAR: red left 6 ticks, blue right 6 ticks, alternating — the money shot
     if (car.spec.lightbar && car.sirenOn) {
       const blue = car.lightPhase >= 6;
+      // wide pooled glow: at thumbnail scale the chase is a street washed in red/blue
+      ctx.globalAlpha = 0.5;
       ctx.fillStyle = blue ? '#2f5fff' : '#ff3049';
-      ctx.fillRect(-3.4 * s, -bodyW * 0.24 - car.h * 0.66 * s, 3 * s, 2.6 * s);
-      ctx.fillStyle = blue ? '#ff3049' : '#2f5fff';
-      ctx.fillRect(0.6 * s, -bodyW * 0.24 - car.h * 0.66 * s, 3 * s, 2.6 * s);
-      // a glow puddle under whichever side is live
-      ctx.globalAlpha = 0.35;
-      ctx.fillStyle = blue ? '#2f5fff' : '#ff3049';
-      ctx.fillRect(-7 * s, -1.5 * s, 14 * s, 3.5 * s);
+      ctx.beginPath();
+      ctx.ellipse(0, 2 * s, halfL * 1.6, bodyW * 1.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 0.22;
+      ctx.fillStyle = blue ? '#6f8fff' : '#ff6b78';
+      ctx.beginPath();
+      ctx.ellipse(0, 2 * s, halfL * 3.2, bodyW * 2.6, 0, 0, Math.PI * 2);
+      ctx.fill();
       ctx.globalAlpha = 1;
+      const bulbH = 4.2 * s; // the bulbs themselves: oversized so they survive shrinking
+      ctx.fillStyle = blue ? '#5588ff' : '#ff5a66';
+      ctx.fillRect(-3.4 * s, -bodyW * 0.24 - car.h * 0.66 * s, 3 * s, bulbH);
+      ctx.fillStyle = blue ? '#ff3049' : '#2f5fff';
+      ctx.fillRect(0.6 * s, -bodyW * 0.24 - car.h * 0.66 * s, 3 * s, bulbH);
+      // mirrored twin bars: a police light bar is read from its reflection lane
+      ctx.fillStyle = blue ? '#2f5fff' : '#ff3049';
+      ctx.fillRect(-3.4 * s, -bodyW * 0.24 - car.h * 0.66 * s - bulbH * 0.35, 3 * s, bulbH * 0.4);
+      ctx.fillStyle = blue ? '#ff3049' : '#2f5fff';
+      ctx.fillRect(0.6 * s, -bodyW * 0.24 - car.h * 0.66 * s - bulbH * 0.35, 3 * s, bulbH * 0.4);
     }
     ctx.restore();
     // damage smoke and the wreck fireball

@@ -323,6 +323,7 @@ export function createRenderer(canvas) {
 
     for (const { b } of visible) {
       const corners = boxCorners(b);
+      const bodyTint = tintForTime(b.tint, world); // one tint per building: faces + parapet share it
       const faces = [];
       // the two walls the yaw leaves fronting the camera: south or north, east or west
       if (sin >= 0) faces.push(faceFromEdge(corners.sw, corners.se, b.h, 0, 1));
@@ -333,7 +334,6 @@ export function createRenderer(canvas) {
       for (const f of faces) {
         const nx = f.nx, nz = f.nz;
         const sunOn = 0.5 + 0.5 * (nx * sunGroundX + nz * sunGroundZ) * 1.6; // 0..1 wall light
-        const bodyTint = tintForTime(b.tint, world);
         ctx.fillStyle = shadeHex(bodyTint, (0.42 + 0.58 * amb) * (0.78 + 0.24 * sunOn));
         drawQuad(f.p0, f.p1, f.p2, f.p3);
         drawWindowGrid(world, f, b, amb);
