@@ -14,7 +14,7 @@ import {
 } from './render.js';
 import {
   createInput, ACTION_ENTER_EXIT, ACTION_WEAPON_NEXT, ACTION_WEAPON_1, ACTION_WEAPON_2, ACTION_WEAPON_3,
-  ACTION_PAUSE,
+  ACTION_PAUSE, ACTION_MENU_BACK,
 } from './input.js';
 import { clamp, dist2, wrapAngle, angleDelta, Rng } from './util.js';
 import {
@@ -336,7 +336,7 @@ function startNewGame() {
 /** loadSavedGame: restore a slot; returns false when the payload is unusable. */
 function loadSavedGame(payload) {
   if (!payload || !payload.pos) return false;
-  missionSetChainIndex(missions, payload.missionIndex || 0);
+  missions.chainIndex = Math.min(payload.missionIndex || 0, missions.chain.length);
   missions.sideJobsDone = payload.sideJobsDone || 0;
   cash = payload.cash || 0;
   player.health = payload.health ?? PLAYER.health;
@@ -619,6 +619,10 @@ function handleMenuTick(actions) {
     handleMenuTick.lastDir = 0;
   }
   const enter = actions & ACTION_ENTER_EXIT;
+  if (actions & ACTION_MENU_BACK) {
+    // M: the how-to card's dedicated closer
+    if (menu && menu.howto) { menu.howto = false; return; }
+  }
   if (enter && menu) {
     const picked = menuSelect(menu);
     if (menu.howto) { menu.howto = false; return; }
@@ -909,6 +913,7 @@ window.__game = {
   combat,
   carPool,
   missions,
+  get mission() { return missions; }, // the spec's probe name for the missions system
   hud: () => ({ cash, stars: police.stars, state: gameState, chainIndex: missions.chainIndex, outcome: missions.lastOutcome }),
   get state() { return gameState; },
   api: {

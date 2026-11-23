@@ -13,6 +13,7 @@ export const ACTION_WEAPON_1 = 8;
 export const ACTION_WEAPON_2 = 16;
 export const ACTION_WEAPON_3 = 32;
 export const ACTION_HORN = 64;
+export const ACTION_MENU_BACK = 128; // M: closes the how-to overlay, nothing else
 
 /** Create the input listener set for the whole game. target is the canvas. */
 export function createInput(target) {
@@ -58,13 +59,18 @@ export function createInput(target) {
       case 'KeyP': case 'Escape':
         if (!event.repeat) actions |= ACTION_PAUSE;
         break;
-      case 'KeyE':
+      case 'KeyE': case 'Enter': case 'NumpadEnter':
+        // E steals a car; ENTER picks menu rows and respawns from busted/wasted
         if (!event.repeat) actions |= ACTION_ENTER_EXIT;
         break;
       case 'Digit1': if (!event.repeat) actions |= ACTION_WEAPON_1; break;
       case 'Digit2': if (!event.repeat) actions |= ACTION_WEAPON_2; break;
       case 'Digit3': if (!event.repeat) actions |= ACTION_WEAPON_3; break;
       case 'KeyQ': if (!event.repeat) actions |= ACTION_WEAPON_NEXT; break;
+      case 'KeyM':
+        // M closes the how-to overlay (menus share the same drain)
+        if (!event.repeat) actions |= ACTION_MENU_BACK;
+        break;
       default: return;
     }
     event.preventDefault();
