@@ -139,10 +139,21 @@ export function paintCar(car, world, ambient) {
     const bodyCol = car.dead ? shadeHex(car.body, 0.28) : shadeHex(car.body, lit);
     ctx.fillStyle = bodyCol;
     ctx.fillRect(-halfL, -bodyW * 0.42, halfL * 2, bodyW * 0.84);
+    // two-tone body: civilian cars (parked and traffic) get a darker skirt under the
+    // beltline so the slab reads as sheet metal, not a flat sticker
+    if (!car.spec.police) {
+      const skirtCol = car.dead ? shadeHex(car.body, 0.2) : shadeHex(car.body, lit * 0.68);
+      ctx.fillStyle = skirtCol;
+      ctx.fillRect(-halfL, bodyW * 0.42 - bodyW * 0.2, halfL * 2, bodyW * 0.2);
+    }
     // roof + cabin
     const roofY = -car.h * 0.62 * s;
     ctx.fillStyle = car.dead ? '#232220' : shadeHex(car.roof, lit);
     ctx.fillRect(-halfL * 0.52, -bodyW * 0.34, halfL * 1.04, bodyW * 0.68);
+    // roof line: a darker strip along the cabin's top edge keeps the silhouette
+    // crisp when the car shrinks to a thumbnail
+    ctx.fillStyle = car.dead ? '#171614' : shadeHex(car.roof, lit * 0.55);
+    ctx.fillRect(-halfL * 0.52, -bodyW * 0.34, halfL * 1.04, 1.3 * s);
     // windshield glint
     ctx.fillStyle = car.dead ? '#3a3a36' : shadeHex('#a8c4d6', lit);
     ctx.fillRect(halfL * 0.52 - 3.2 * s, -bodyW * 0.30, 3.2 * s, bodyW * 0.60);
