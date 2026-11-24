@@ -21,6 +21,25 @@ const GREEN = '#47c46e';
 const BLUE = '#4f9fe0';
 const PALE = '#f2ecd9';
 
+/**
+ * hudMetrics: the HUD's own frame. Every plate is laid out against the live canvas size, so the
+ * layout scales with the window instead of assuming 1280x720, and every element keeps a margin
+ * from the edges so nothing clips at any size.
+ */
+export function hudMetrics(ctx) {
+  let dpr = 1;
+  try {
+    const t = ctx.getTransform ? ctx.getTransform() : null;
+    if (t && t.a) dpr = t.a;
+  } catch { dpr = 1; }
+  const cw = (ctx.canvas && ctx.canvas.width) || VIEW.width;
+  const ch = (ctx.canvas && ctx.canvas.height) || VIEW.height;
+  const w = cw / dpr;
+  const h = ch / dpr;
+  const s = Math.max(0.4, Math.min(w / VIEW.width, h / VIEW.height));
+  return { w, h, s, margin: Math.round(18 * s) };
+}
+
 /** hudTextPlate: the shared dark plate with an amber border and bold cream text. Returns width. */
 export function hudTextPlate(ctx, text, x, y, scale = 1, opts = {}) {
   const fontPx = Math.round(19 * scale);
@@ -76,69 +95,77 @@ export function updateHud(hud, dt, cashNow) {
  * panel centre, minimap right) stays collision-free — the previous bottom-of-screen placement
  * put the bar straight through the objective panel's plate whenever both were on screen. */
 export function drawHealthArmorBars(ctx, health, armor) {
-  const barX = VIEW.width - 320 - 260;
-  drawSegmentedBar(ctx, barX, 176, 270, health / 100, 'HEALTH', GREEN, false);
+  const m = hudMetrics(ctx);
+  const w = 240 * m.s;
+  const x = m.w - m.margin - w;
+  drawSegmentedBar(ctx, x, m.margin + 138 * m.s, w, health / 100, 'HEALTH', GREEN, m.s);
   const armorFrac = armor / 100;
   if (armor > 0) {
-    drawSegmentedBar(ctx, barX, 220, 270, armorFrac, 'ARMOR', BLUE, false);
+    drawSegmentedBar(ctx, x, m.margin + 180 * m.s, w, armorFrac, 'ARMOR', BLUE, m.s);
   }
 }
 
 /** One segmented meter: 10 fat cells; label burns amber when low. */
-function drawSegmentedBar(ctx, x, y, w, frac, label, color, rightAlign) {
-  const h = 26;
+function drawSegmentedBar(ctx, x, y, w, frac, label, color, s = 1) {
+  const h = 26 * s;
+  const pad = 8 * s;
   ctx.fillStyle = PLATE;
-  ctx.fillRect(x - 8, y - 8, w + 16, h + 16);
+  ctx.fillRect(x - pad, y - pad, w + pad * 2, h + pad * 2);
   ctx.strokeStyle = PLATE_EDGE;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(x - 8, y - 8, w + 16, h + 16);
+  ctx.lineWidth = 2 * s;
+  ctx.strokeRect(x - pad, y - pad, w + pad * 2, h + pad * 2);
   const segs = 10;
   const segW = w / segs;
   const lit = Math.round(clamp(frac, 0, 1) * segs);
   ctx.fillStyle = 'rgba(255,255,255,0.08)';
   ctx.fillRect(x, y, w, h);
   for (let i = 0; i < segs; i += 1) {
-    const cx = x + i * segW + 2;
+    const cx = x + i * segW + 2 * s;
     if (i < lit) {
       ctx.fillStyle = (label === 'HEALTH' && frac < 0.28) ? RED : color;
-      ctx.fillRect(cx, y + 2, segW - 4, h - 4);
+      ctx.fillRect(cx, y + 2 * s, segW - 4 * s, h - 4 * s);
     } else {
       ctx.fillStyle = 'rgba(255,255,255,0.05)';
-      ctx.fillRect(cx, y + 2, segW - 4, h - 4);
+      ctx.fillRect(cx, y + 2 * s, segW - 4 * s, h - 4 * s);
     }
   }
-  ctx.font = '800 15px system-ui, sans-serif';
+  ctx.font = `800 ${Math.round(15 * s)}px system-ui, sans-serif`;
   ctx.fillStyle = (label === 'HEALTH' && frac < 0.28) ? RED : AMBER;
   ctx.strokeStyle = 'rgba(0,0,0,0.55)';
   ctx.lineWidth = 3;
   ctx.textAlign = 'left';
-  ctx.strokeText(label, x, y + h / 2 + 6);
-  ctx.fillText(label, x, y + h / 2 + 6);
+  ctx.strokeText(label, x, y + h / 2 + 6 * s);
+  ctx.fillText(label, x, y + h / 2 + 6 * s);
 }
 
 /** cashCounter: the displayed cash eases up to the real total, top-right, amber money green. */
 export function drawCashCounter(ctx, hud, cashNow) {
+  const m = hudMetrics(ctx);
+  const s = m.s;
   const shown = Math.round(hud.cashShown);
   const text = `$${String(shown).padStart(6, '0')}`;
-  ctx.font = '800 30px system-ui, sans-serif';
-  const w = ctx.measureText(text).width + 30;
-  const x = VIEW.width - w - 18, y = 132; // below the star plate, never overlapped by it
+  ctx.font = `800 ${Math.round(30 * s)}px system-ui, sans-serif`;
+  const w = ctx.measureText(text).width + 34 * s;
+  const x = m.w - m.margin - w;
+  const y = m.margin + 92 * s; // below the wanted plate, in the right-hand column
   ctx.fillStyle = INK;
-  ctx.fillRect(x, y - 34, w, 48);
+  ctx.fillRect(x, y, w, 52 * s);
   ctx.strokeStyle = PLATE_EDGE;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(x, y - 34, w, 48);
-  ctx.fillStyle = '#63e08c';
-  ctx.textAlign = 'right';
-  ctx.fillText(text, x + w - 12, y + 4);
-  // a near-identical plate to buildd's plate below: label with amber label
-  ctx.font = '800 13px system-ui, sans-serif';
+  ctx.lineWidth = 2 * s;
+  ctx.strokeRect(x, y, w, 52 * s);
+  ctx.font = `800 ${Math.round(13 * s)}px system-ui, sans-serif`;
   ctx.fillStyle = AMBER;
   ctx.textAlign = 'left';
-  ctx.fillText('CASH', x + 12, y + 2 - 16);
+  ctx.fillText('CASH', x + 12 * s, y + 15 * s);
+  ctx.fillStyle = '#63e08c';
+  ctx.font = `800 ${Math.round(30 * s)}px system-ui, sans-serif`;
+  ctx.textAlign = 'right';
+  ctx.fillText(text, x + w - 12 * s, y + 40 * s);
   if (cashNow > shown) {
     ctx.fillStyle = '#9df2b4';
-    ctx.fillText('+$' + Math.round(cashNow - shown), x + 12, y + 24);
+    ctx.font = `800 ${Math.round(13 * s)}px system-ui, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillText('+$' + Math.round(cashNow - shown), x + 12 * s, y + 42 * s);
   }
   ctx.textAlign = 'left';
 }
@@ -146,38 +173,40 @@ export function drawCashCounter(ctx, hud, cashNow) {
 /** wantedStars: five 36px stars on a dark plate with an amber border; lit stars multiply-
  *  flash in place while any unit sees the hero; the cooldown bar drains under them. */
 export function drawWantedStars(ctx, stars, hot, cooldownFrac, worldTimeTick) {
-  const x0 = VIEW.width - 266, y0 = 34;
-  const SIZE = 36;
-  const w = stars === 0 ? 42 : 5 * SIZE + 44 ; // plate wide enough for all five when alive
+  const m = hudMetrics(ctx);
+  const s = m.s;
+  const SIZE = 36 * s;
+  const plateW = (stars === 0 ? 42 : 5 * 36 + 44) * s;
+  const x0 = m.w - m.margin - plateW + 14 * s; // right-aligned plate
+  const y0 = m.margin + 30 * s;
   ctx.fillStyle = INK;
-  ctx.fillRect(x0 - 14, y0 - 30, w, 60);
+  ctx.fillRect(x0 - 14 * s, y0 - 30 * s, plateW, 60 * s);
   ctx.strokeStyle = PLATE_EDGE;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(x0 - 14, y0 - 30, w, 60);
+  ctx.lineWidth = 2 * s;
+  ctx.strokeRect(x0 - 14 * s, y0 - 30 * s, plateW, 60 * s);
   if (stars === 0) {
     ctx.fillStyle = 'rgba(255,255,255,0.25)';
-    ctx.font = `800 ${SIZE - 6}px system-ui, sans-serif`;
+    ctx.font = `800 ${Math.round(SIZE - 6)}px system-ui, sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillText('*', x0 + 6, y0 + 14);
+    ctx.fillText('*', x0 + 6 * s, y0 + 14 * s);
     ctx.textAlign = 'left';
     return;
   }
   for (let i = 0; i < 5; i += 1) {
-    const sx = x0 + i * (SIZE + 6) + 6;
+    const sx = x0 + i * (SIZE + 6 * s) + 6 * s;
     const lit = (i + 1) <= stars;
     const flash = hot ? (Math.sin(worldTimeTick * 0.25 + i * 1.1) > 0) : true;
-    drawStarShape(ctx, sx + SIZE / 2, y0 + 2, SIZE / 2 - 1,
+    drawStarShape(ctx, sx + SIZE / 2, y0 + 2 * s, SIZE / 2 - 1,
       lit ? (flash ? '#ffd34e' : '#e8b23a') : 'rgba(255,255,255,0.09)',
       lit, flash);
   }
   // the cooldown meter while no unit sees the hero and stars are crawling down
   if (cooldownFrac > 0.01) {
-    const cw = (stars === 0 ? 42 : 5 * SIZE + 44) - 0;
-    const barW = cw * (1 - 0);
+    const barW = (plateW - 12 * s) * clamp(cooldownFrac, 0, 1);
     ctx.fillStyle = 'rgba(255,255,255,0.12)';
-    ctx.fillRect(x0 - 8, y0 + 18, barW - 12, 5);
+    ctx.fillRect(x0 - 8 * s, y0 + 18 * s, plateW - 12 * s, 5 * s);
     ctx.fillStyle = PLATE_EDGE;
-    ctx.fillRect(x0 - 8, y0 + 18, (barW - 12) * clamp(cooldownFrac, 0, 1), 5);
+    ctx.fillRect(x0 - 8 * s, y0 + 18 * s, barW, 5 * s);
   }
 }
 
@@ -211,53 +240,58 @@ function drawStarShape(ctx, cx, cy, r, fill, lit, flash) {
  * both survive shrinking.
  */
 export function drawObjectivePanel(ctx, heading, text, distText, urgent = false) {
-  const fontPx = 24;
+  const m = hudMetrics(ctx);
+  const s = m.s;
+  const fontPx = Math.round(22 * s);
   ctx.font = `800 ${fontPx}px system-ui, sans-serif`;
-  const tw = Math.min(ctx.measureText(text).width + 40, VIEW.width * 0.62);
-  const x = (VIEW.width - tw) / 2;
-  const y = VIEW.height - 58;
-  const h = 64;
+  // width caps at the free strip between the weapon box and the minimap plate
+  const maxW = Math.min(m.w * 0.46, m.w - m.margin * 2 - 240 * s * 2);
+  const tw = Math.min(ctx.measureText(text).width + 56 * s + (distText ? 110 * s : 0), maxW);
+  const plateH = 52 * s;
+  const x = (m.w - tw) / 2;
+  const y = m.h - m.margin - plateH; // the plate's bottom edge rides the bottom margin
   ctx.fillStyle = PLATE;
-  ctx.fillRect(x - 12, y - 18, tw + 24, 34);
+  ctx.fillRect(x, y, tw, plateH);
   ctx.strokeStyle = urgent ? RED : PLATE_EDGE;
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.moveTo(x - 12, y - 18);
-  ctx.rect(x - 12, y - 18, tw + 24, 34);
-  ctx.stroke();
+  ctx.lineWidth = 2.5 * s;
+  ctx.strokeRect(x, y, tw, plateH);
   // label line
-  ctx.font = '800 14px system-ui, sans-serif';
+  ctx.font = `800 ${Math.round(13 * s)}px system-ui, sans-serif`;
   ctx.fillStyle = urgent ? '#ff8c92' : AMBER;
   ctx.textAlign = 'left';
-  ctx.fillText(heading, x, y + 6);
+  ctx.fillText(heading, x + 12 * s, y + 14 * s);
   // objective text line, clipped to its width
   ctx.save();
   ctx.beginPath();
-  ctx.rect(x - 2, y + 12, tw - (distText ? 108 : 0) + 2, fontPx + 6);
+  ctx.rect(x + 10 * s, y + 18 * s, tw - (distText ? 120 * s : 20 * s), plateH - 16 * s);
   ctx.clip();
   ctx.font = `800 ${fontPx}px system-ui, sans-serif`;
   ctx.fillStyle = PALE;
-  ctx.fillText(text, x, y + 36);
+  ctx.fillText(text, x + 12 * s, y + plateH - 10 * s);
   ctx.restore();
   if (distText) {
     ctx.font = `800 ${fontPx}px system-ui, sans-serif`;
     ctx.fillStyle = '#9fe8ff';
     ctx.textAlign = 'right';
-    ctx.fillText(distText, x + tw - 8, y + 36);
+    ctx.fillText(distText, x + tw - 12 * s, y + plateH - 10 * s);
     ctx.textAlign = 'left';
   }
 }
 
 /** minimapPanel: blits renderer.fillMinimap into a ~230px bordered corner canvas. */
 export function drawMinimapPanel(ctx, renderer, marks, size = 230) {
-  const pad = 16;
-  const x = VIEW.width - size - pad + 4;
-  const y = VIEW.height - size - pad;
+  const m = hudMetrics(ctx);
+  const s = m.s;
+  // shrink the map rather than clip it: it must clear the bottom-right margin at any size
+  const fit = Math.min(size * s, m.h - m.margin * 2, m.w - m.margin * 2 - 260 * s);
+  const frame = fit + 16 * s;
+  const x = m.w - m.margin - frame + 8 * s;
+  const y = m.h - m.margin - frame + 8 * s;
   ctx.fillStyle = INK;
-  ctx.fillRect(x - 8, y - 8, size + 16, size + 16);
+  ctx.fillRect(x - 8 * s, y - 8 * s, frame, frame);
   ctx.strokeStyle = PLATE_EDGE;
-  ctx.lineWidth = 4;
-  ctx.strokeRect(x - 8, y - 8, size + 16, size + 16);
+  ctx.lineWidth = 4 * s;
+  ctx.strokeRect(x - 8 * s, y - 8 * s, frame, frame);
   if (!renderer || typeof renderer.fillMinimap !== 'function') return;
   const mini = ensureMiniCanvas(size);
   const mctx = mini.getContext('2d');
@@ -279,50 +313,56 @@ function ensureMiniCanvas(size) {
 
 /** weaponAmmoBox: bottom-left plate with the current weapon name and BIG ammo digits. */
 export function drawWeaponAmmoBox(ctx, weaponName, ammo) {
-  const x = 24, y = VIEW.height - 76;
+  const m = hudMetrics(ctx);
+  const s = m.s;
+  const x = m.margin;
+  const y = m.h - m.margin - 56 * s;
   ctx.fillStyle = PLATE;
-  ctx.fillRect(x, y, 168, 56);
+  ctx.fillRect(x, y, 168 * s, 56 * s);
   ctx.strokeStyle = PLATE_EDGE;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(x, y, 168, 56);
-  ctx.font = '800 15px system-ui, sans-serif';
+  ctx.lineWidth = 2 * s;
+  ctx.strokeRect(x, y, 168 * s, 56 * s);
+  ctx.font = `800 ${Math.round(15 * s)}px system-ui, sans-serif`;
   ctx.fillStyle = AMBER;
   ctx.textAlign = 'left';
-  ctx.fillText(String(weaponName).toUpperCase(), x + 12, y + 22);
+  ctx.fillText(String(weaponName).toUpperCase(), x + 12 * s, y + 22 * s);
   const infinite = ammo === Infinity;
-  ctx.font = '800 30px system-ui, sans-serif';
+  ctx.font = `800 ${Math.round(30 * s)}px system-ui, sans-serif`;
   ctx.fillStyle = infinite ? '#bfe0ff' : (ammo > 0 ? PALE : RED);
-  ctx.fillText(infinite ? '--' : String(ammo), x + 12, y + 48);
+  ctx.fillText(infinite ? '--' : String(ammo), x + 12 * s, y + 48 * s);
 }
 
 /** gameClock: HH:MM on a dark plate, top-left, the game's own clock not the wall's. */
 export function drawGameClock(ctx, world) {
+  const m = hudMetrics(ctx);
+  const s = m.s;
   const text = clockString(world);
   const label = 'CITY CLOCK';
-  ctx.font = '800 15px system-ui, sans-serif';
+  ctx.font = `800 ${Math.round(13 * s)}px system-ui, sans-serif`;
   const lw = ctx.measureText(label).width;
-  ctx.font = '800 34px system-ui, sans-serif';
+  ctx.font = `800 ${Math.round(34 * s)}px system-ui, sans-serif`;
   const tw = ctx.measureText(text).width;
-  const w = Math.max(lw, tw) + 22;
-  const x = 20, y = 54;
+  const w = Math.max(lw, tw) + 22 * s;
+  const x = m.margin;
+  const y = m.margin + 34 * s;
   ctx.fillStyle = INK;
-  ctx.fillRect(x - 8, y - 34, w, 58);
+  ctx.fillRect(x, y - 34 * s, w, 58 * s);
   ctx.strokeStyle = PLATE_EDGE;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(x - 8, y - 34, w, 58);
+  ctx.lineWidth = 2 * s;
+  ctx.strokeRect(x, y - 34 * s, w, 58 * s);
   ctx.fillStyle = AMBER;
-  ctx.font = '800 13px system-ui, sans-serif';
-  ctx.fillText(label, x, y - 16);
+  ctx.font = `800 ${Math.round(13 * s)}px system-ui, sans-serif`;
+  ctx.fillText(label, x + 8 * s, y - 16 * s);
   ctx.fillStyle = PALE;
-  ctx.font = '800 34px system-ui, sans-serif';
-  ctx.fillText(text, x, y + 18);
+  ctx.font = `800 ${Math.round(34 * s)}px system-ui, sans-serif`;
+  ctx.fillText(text, x + 8 * s, y + 18 * s);
 }
 
 /** toastQueue: the stacked notes; banners ride the centre at 64px, small toasts bottom-left. */
 export function drawToastQueue(ctx, hud) {
   const banner = hud.toasts.find((t) => t.kind === 'banner');
   if (banner) drawUIAlertBanner(ctx, banner);
-  let ty = VIEW.height / 2 + 74;
+  let ty = hudMetrics(ctx).h / 2 + 74;
   for (const t of hud.toasts) {
     if (t.kind === 'banner') continue;
     drawToastCard(ctx, t, ty);
